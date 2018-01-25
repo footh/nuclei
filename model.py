@@ -40,6 +40,9 @@ def build_graph():
 
     img_input = tf.placeholder(tf.float32, [None, IMG_HEIGHT, IMG_WIDTH, 3], name='img_input')
   
+    # Better way to do this is, build out all the convolutions first and save the last 3 in different variables, then run the upsampling
+    # on the three different convolution points. 
+    
     # 0
     net = tf.keras.layers.Conv2D(FEATURE_ROOT, (3,3), padding='same', activation='relu')(img_input)
     
