@@ -26,14 +26,16 @@ def bilinear_interp_init(shape, dtype=None, partition_info=None):
         for y in range(height):
             value = (1 - abs(x / f - c)) * (1 - abs(y / f - c))
             bilinear[x,y] = value
-            
+    
+    tf.logging.info(bilinear.shape)        
     weights = np.zeros(shape, dtype=dtype.as_numpy_dtype())
     for i in range(shape[2]):
         weights[:,:,i,i] = bilinear
         
     tf.logging.info(weights.shape)
-    #return weights
-    return tf.convert_to_tensor(weights, dtype=dtype, name='bilinear_interp_init')
+    return weights
+    #return tf.convert_to_tensor(weights, dtype=dtype, name='bilinear_interp_init')
+    #return tf.constant(weights, shape=shape, dtype=dtype, name='bilinear_interp_init')
 
 def build_graph():
     sess = tf.InteractiveSession()
