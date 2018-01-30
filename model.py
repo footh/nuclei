@@ -45,6 +45,8 @@ def build_graph():
     # Better way to do this is, build out all the convolutions first and save the last 3 in different variables, then run the upsampling
     # on the three different convolution points. 
     
+    upsample_convs = []
+    
     # 0
     net = tf.keras.layers.Conv2D(FEATURE_ROOT, (3,3), padding='same', activation='relu')(img_input)
     
@@ -61,6 +63,25 @@ def build_graph():
     net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
     tf.logging.info(f"net after #3: {net}")
     
+    upsample_convs.append(net)
+    
+    # 4
+    net = tf.keras.layers.Conv2D(FEATURE_ROOT*8, (3,3), padding='same', activation='relu')(net)
+    net = tf.keras.layers.Dropout(rate=DROPOUT_PROB)(net)
+    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
+    tf.logging.info(f"net after #4: {net}")
+
+    upsample_convs.append(net)
+
+    # 5
+    net = tf.keras.layers.Conv2D(FEATURE_ROOT*16, (3,3), padding='same', activation='relu')(net)
+    net = tf.keras.layers.Dropout(rate=DROPOUT_PROB)(net)
+    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
+    tf.logging.info(f"net after #5: {net}")
+
+    upsample_convs.append(net)
+
+
     c_tconv1 = tf.keras.layers.Conv2DTranspose(TCONV_OUTPUT_CHANNELS, 
                                               (TCONV_ROOT*2, TCONV_ROOT*2), 
                                               strides=(TCONV_ROOT, TCONV_ROOT),
@@ -77,11 +98,6 @@ def build_graph():
                                               kernel_initializer=bilinear_interp_init)(net)
     s_tconv1_output = tf.keras.layers.Conv2D(TCONV_OUTPUT_CHANNELS, (1,1), padding='same', activation='relu')(s_tconv1)
 
-    # 4
-    net = tf.keras.layers.Conv2D(FEATURE_ROOT*8, (3,3), padding='same', activation='relu')(net)
-    net = tf.keras.layers.Dropout(rate=DROPOUT_PROB)(net)
-    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
-    tf.logging.info(f"net after #4: {net}")
 
     c_tconv2 = tf.keras.layers.Conv2DTranspose(TCONV_OUTPUT_CHANNELS, 
                                               (TCONV_ROOT*4, TCONV_ROOT*4), 
