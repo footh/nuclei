@@ -89,7 +89,8 @@ def _draw_contours(src, dest):
     
 def full_mask(raw_file_path, with_contours=True):
     """
-        Given the raw_file_path, get the full ground truth mask for that file combining individual masks
+        Given the raw_file_path, get the full ground truth mask for that file combining individual masks. If the with_contours
+        value is True (default) a contour image will be created.
     """
     masks = []
     for type in IMG_TYPES:    
@@ -119,8 +120,8 @@ def full_mask(raw_file_path, with_contours=True):
     
 def setup(src='train'):
     """
-        Move raw files with full ground truth segment masks over to the src directory. File names are id-{type}.png where type is
-        'src' for source image and 'seg' for segment mask
+        Move raw files with full ground truth segment and contour masks over to the src directory. File names are id-{type}.png where 
+        type is 'src' for source image, 'seg' for segment mask and 'con' for contour mask
     """
     print(f"Clearing {src} directory...")
     _remove_files(src)

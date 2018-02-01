@@ -1,4 +1,8 @@
 import tensorflow as tf
+from tensorflow.contrib import slim as slim
+from tensorflow.contrib.slim.python.slim.nets import resnet_v2
+from tensorflow.contrib.slim.python.slim.nets import resnet_v1
+
 import numpy as np
 import math
 
@@ -37,8 +41,7 @@ def bilinear_interp_init(shape, dtype=None, partition_info=None):
     #return tf.convert_to_tensor(weights, dtype=dtype, name='bilinear_interp_init')
     #return tf.constant(weights, shape=shape, dtype=dtype, name='bilinear_interp_init')
 
-def build_graph():
-    sess = tf.InteractiveSession()
+def build_custom():
 
     img_input = tf.placeholder(tf.float32, [None, IMG_HEIGHT, IMG_WIDTH, 3], name='img_input')
   
@@ -121,4 +124,62 @@ def build_graph():
     
     tf.logging.info(c_fuse)
     tf.logging.info(s_fuse)
+    
+
+def resnet_v1_50(inputs,
+                 num_classes=None,
+                 is_training=True,
+                 global_pool=True,
+                 output_stride=None,
+                 reuse=None,
+                 scope='resnet_v1_50'):
+  """ResNet-50 model of [1]. See resnet_v1() for arg and return description."""
+  blocks = [
+      resnet_v1.resnet_v1_block('block1', base_depth=64, num_units=3, stride=1),
+      resnet_v1.resnet_v1_block('block2', base_depth=128, num_units=4, stride=2),
+      resnet_v1.resnet_v1_block('block3', base_depth=256, num_units=6, stride=2),
+      resnet_v1.resnet_v1_block('block4', base_depth=512, num_units=3, stride=2),
+  ]
+  return resnet_v1.resnet_v1(
+      inputs,
+      blocks,
+      num_classes,
+      is_training,
+      global_pool,
+      output_stride,
+      include_root_block=True,
+      reuse=reuse,
+      scope=scope)    
+    
+def build_resnet50_v1():
+
+    img_input = tf.placeholder(tf.float32, [None, IMG_HEIGHT, IMG_WIDTH, 3], name='img_input')
+
+    #model = tf.keras.applications.ResNet50(include_top=False, input_tensor=img_input)
+    
+    #model.summary()
+    #return model
+    with slim.arg_scope(resnet_v1.resnet_arg_scope()):
+        net, endpoints = resnet_v1_50(img_input, is_training=True, global_pool=False)
+
+    return net, endpoints
+
+def build_resnet50_v2():
+
+    img_input = tf.placeholder(tf.float32, [None, IMG_HEIGHT, IMG_WIDTH, 3], name='img_input')
+
+    with slim.arg_scope(resnet_v2.resnet_arg_scope()):
+        net, endpoints = resnet_v2.resnet_v2_50(img_input, is_training=True, global_pool=False)
+
+    return net, endpoints
+
+def test():
+    img_input = tf.placeholder(tf.float32, [None, IMG_HEIGHT, IMG_WIDTH, 3], name='img_input')
+    
+    x = tf.keras.layers.Conv2D(64, (7, 7), strides=(2, 2), padding='same', name='conv1')(img_input)
+    x = tf.keras.layers.BatchNormalization(axis=3, name='bn_conv1')(x)
+    x = tf.keras.layers.Activation('relu')(x)
+    x = tf.keras.layers.MaxPooling2D((3, 3), strides=(2, 2), padding='same')(x)
+    
+    return x
     
