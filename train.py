@@ -5,6 +5,7 @@ import model
 IMG_SIZE = 256
 MODEL_SCOPE = "dcan"
 
+
 def loss(c_logits, s_logits, c_labels, s_labels):
     """
         Derives a loss function given the contour and segment results and labels
@@ -21,6 +22,7 @@ def loss(c_logits, s_logits, c_labels, s_labels):
     total_loss = tf.add(c_loss, s_loss, name='total_loss')
     
     return total_loss
+
 
 def train():
     sess = tf.InteractiveSession()
