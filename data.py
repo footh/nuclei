@@ -2,8 +2,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-
+import tensorflow as tf
 from tensorflow.python.platform import gfile
+from tensorflow.python.util import compat
 
 import os
 import shutil
@@ -11,8 +12,11 @@ import numpy as np
 from PIL import Image
 from sklearn.cluster import KMeans
 from skimage import measure
+import hashlib
 
 IMG_TYPES = ['*.png']
+
+MAX_NUM_PER_CLASS = 2**27 - 1  # ~134M
 
 def _remove_files(src):
     """
@@ -24,17 +28,26 @@ def _remove_files(src):
         # map lazy evaluates so must wrap in list to force evaluation
         list(map(_remove_files, [os.path.join(src, fi) for fi in os.listdir(src)])) 
 
-def raw_file_list(src='train'):
+def file_list(src_dir):
     """
-        Return a list of files from the raw-data directory for the given src
+        Return a list of files from the src_dir directory
     """
+
     result = []
     for type in IMG_TYPES:
-        search_path = os.path.join('raw-data', src, '*', 'images', type)
+        search_path = os.path.join(src_dir, type)
         for img_path in gfile.Glob(search_path):
             result.append(img_path)
 
     return result
+    
+
+def raw_file_list(src='train'):
+    """
+        Return a list of files from the raw-data directory for the given src
+    """
+    src_dir = os.path.join('raw-data', src, '*', 'images', type)
+    return file_list(src_dir)
 
 def as_images(src='train', size=None):
     """
@@ -113,8 +126,8 @@ def full_mask(raw_file_path, with_contours=True):
         mask = np.maximum(mask, mask_img)
         
         if with_contours:
-            contour = _draw_contours(mask_img, contour)
-            
+            # TODO: DCAN paper talks about applying a transformation to the contours to make them better (thicker I think?)
+            contour = _draw_contours(mask_img, contour)            
         
     return Image.fromarray(mask), Image.fromarray(contour)
     
@@ -135,5 +148,52 @@ def setup(src='train'):
         shutil.copy2(f, os.path.join(src, f"{name}-src.{ext}"))        
         mask.save(os.path.join(src, f"{name}-seg.{ext}"))
         contour.save(os.path.join(src, f"{name}-con.{ext}"))
+        
+        
+def which_set(file_id, validation_pct, testing_pct):
+    """
+        Determines which data partition the file should belong to.
+        (taken from tensorflow speech audio tutorial
+    
+        Returns string, one of 'training', 'validation', or 'testing'.
+    """
+    file_id_hashed = hashlib.sha1(compat.as_bytes(file_id)).hexdigest()
+    percentage_hash = ((int(file_id_hashed, 16) % (MAX_NUM_PER_CLASS + 1)) * (100.0 / MAX_NUM_PER_CLASS))
 
+    if percentage_hash < validation_pct:
+        result = 'validation'
+    elif percentage_hash < (testing_pct + validation_pct):
+        result = 'testing'
+    else:
+        result = 'training'
+    
+    return result
+
+class DataProcessor():
+    
+    def __init__(self, src='train', validation_pct=15, testing_pct=0):
+        self.src = src
+        self.validation_pct = validation_pct
+        self.testing_pct = testing_pct
+
+        self.generate_data_index()
+
+
+    def generate_data_index(self):
+        src_dir = self.src
+        
+        self.data_index = {'training': [], 'validation': [], 'testing': []}
+
+        # Getting the unique file ids in the src set
+        all_files = file_list(src_dir)
+        file_ids = list({os.path.basename(file).split('-')[0] for file in all_files})
+        tf.logging.info(f"Total unique files found: {len(file_ids)}")
+        
+        for file_id in file_ids:
+            idx = which_set(file_id, self.validation_pct, self.testing_pct)
+            self.data_index[idx].append(file_id)
+            
+        tf.logging.info(f"Training total: {len(self.data_index['training'])}")
+        tf.logging.info(f"Validation total: {len(self.data_index['validation'])}")
+        tf.logging.info(f"Testing total: {len(self.data_index['testing'])}")
         
