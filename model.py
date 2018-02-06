@@ -157,23 +157,15 @@ def upsample_and_fuse(ds_layers, img_size):
     # TODO: do a 1x1 convolution after t-convolution? The dcan implements it but I think that is based on the referenced
     # FCN paper and implementation. The dcan paper doesn't mention it explicitly.
     # TODO: weight initialization on t-convolution layers, ie bilinear upsampling. The impl above I think is flawed.
+    # TODO: regularization? The dcan paper has L2 in the formula. What about dropout? Slim's resnet I believe has L2, need to check
     
-    contour_outputs = []
     segment_outputs = []
+    contour_outputs = []
     
     for i, ds_layer in enumerate(ds_layers):
         kernel = TCONV_ROOT * 2**(i+1)
         stride = img_size // ds_layer.shape.as_list()[1]
         tf.logging.debug(f"layer {i+1} kernel, stride: {kernel, stride}")
-        
-        net = layers.conv2d_transpose(ds_layer,
-                                      1, 
-                                      kernel, 
-                                      stride, 
-                                      padding='SAME', 
-                                      activation_fn=None, 
-                                      scope=f"tconv{i+1}_con")
-        contour_outputs.append(net)
         
         net = layers.conv2d_transpose(ds_layer, 
                                       1, 
@@ -183,11 +175,21 @@ def upsample_and_fuse(ds_layers, img_size):
                                       activation_fn=None, 
                                       scope=f"tconv{i+1}_seg")
         segment_outputs.append(net)
+
+        net = layers.conv2d_transpose(ds_layer,
+                                      1, 
+                                      kernel, 
+                                      stride, 
+                                      padding='SAME', 
+                                      activation_fn=None, 
+                                      scope=f"tconv{i+1}_con")
+        contour_outputs.append(net)
+
     
-    c_fuse = tf.add_n(contour_outputs, name="contour_fuse")
     s_fuse = tf.add_n(segment_outputs, name="segment_fuse")
+    c_fuse = tf.add_n(contour_outputs, name="contour_fuse")
     
-    return c_fuse, s_fuse
+    return s_fuse, c_fuse
 
 def logits(input, ds_model='resnet50_v1', scope=None):
     """

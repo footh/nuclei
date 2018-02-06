@@ -14,7 +14,9 @@ from sklearn.cluster import KMeans
 from skimage import measure
 import hashlib
 
-IMG_TYPES = ['*.png']
+IMG_EXT = 'png'
+IMG_CHANNELS = 3
+VGG_RGB_MEANS = [123.68, 116.78, 103.94]
 
 MAX_NUM_PER_CLASS = 2**27 - 1  # ~134M
 
@@ -41,12 +43,10 @@ def file_list(src_dir):
     """
         Return a list of files from the src_dir directory
     """
-
     result = []
-    for type in IMG_TYPES:
-        search_path = os.path.join(src_dir, type)
-        for img_path in gfile.Glob(search_path):
-            result.append(img_path)
+    search_path = os.path.join(src_dir, f"*.{IMG_EXT}")
+    for img_path in gfile.Glob(search_path):
+        result.append(img_path)
 
     return result
     
@@ -119,10 +119,9 @@ def full_mask(raw_file_path, with_contours=True):
         with_contours value is True (default) a contour image will be created.
     """
     masks = []
-    for img_type in IMG_TYPES:
-        search_path = os.path.join(os.path.dirname(raw_file_path), '..', 'masks', img_type)
-        for img_path in gfile.Glob(search_path):
-            masks.append(img_path)
+    search_path = os.path.join(os.path.dirname(raw_file_path), '..', 'masks', f"*.{IMG_EXT}")
+    for img_path in gfile.Glob(search_path):
+        masks.append(img_path)
             
     img_shape = Image.open(masks[0]).size
     img_shape = (img_shape[1], img_shape[0])
@@ -229,11 +228,16 @@ class DataProcessor:
         left = np.random.randint(0, left_max)
         tf.logging.debug(f"top, left: {top}, {left}")
         return top, left
+    
+    def _augment(self, sample):
+        # TODO: sample augmentation (random flips, distortion, etc.)
+        return sample
 
     def batch(self, size, offset=0, mode='train'):
         """
             Return a batch of data from the given mode, offset by the given amount
         """
+        is_training = (mode == 'train')
 
         source_ids = self.data_index[mode]
         if size == -1:
@@ -242,12 +246,12 @@ class DataProcessor:
             sample_count = max(0, min(size, len(source_ids) - offset))
 
         # Initializing return values
-        data = np.zeros((sample_count, self.img_size, self.img_size, 3), dtype=np.float32)
-        s_labels = np.zeros((sample_count, self.img_size, self.img_size), dtype=np.float32)
-        c_labels = np.zeros((sample_count, self.img_size, self.img_size), dtype=np.float32)
+        data = np.zeros((sample_count, self.img_size, self.img_size, IMG_CHANNELS), dtype=np.float32)
+        labels_seg = np.zeros((sample_count, self.img_size, self.img_size), dtype=np.float32)
+        labels_con = np.zeros((sample_count, self.img_size, self.img_size), dtype=np.float32)
 
         for i in range(offset, offset + sample_count):
-            if size == -1 or mode != 'train':
+            if size == -1 or not is_training:
                 sample_index = i
             else:
                 sample_index = np.random.randint(len(source_ids))
@@ -255,23 +259,27 @@ class DataProcessor:
             sample = source_ids[sample_index]
             tf.logging.debug(f"Using sample: {sample}")
 
-            # TODO: assuming .png here, should just remove the multiple format support
-            sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample}-{IMG_SRC}.png")))
-            sample_seg = np.asarray(Image.open(os.path.join(self.src, f"{sample}-{IMG_SEGMENT}.png")))
-            sample_con = np.asarray(Image.open(os.path.join(self.src, f"{sample}-{IMG_CONTOUR}.png")))
+            sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample}-{IMG_SRC}.{IMG_EXT}")))
+            sample_seg = np.asarray(Image.open(os.path.join(self.src, f"{sample}-{IMG_SEGMENT}.{IMG_EXT}")))
+            sample_con = np.asarray(Image.open(os.path.join(self.src, f"{sample}-{IMG_CONTOUR}.{IMG_EXT}")))
 
             # Picking a random sample of the image (if it is larger than the provided img_size)
             top, left = self._sampling_points(sample_src)
-            # TODO: should save images without the alpha channel in the setup method
-            sample_src = sample_src[top:top + self.img_size, left:left + self.img_size, 0:3]
+            sample_src = sample_src[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
             sample_seg = sample_seg[top:top + self.img_size, left:left + self.img_size]
             sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
 
-            # TODO: preprocessing (mean subtraction, RGB to BGR, etc.)
-            # TODO: augmentation (flipping, elastic distortion, etc.)
+            if is_training:
+                sample_src = _augment(sample_src)
+
+            # Slim's vgg_preprocessing only does the mean subtraction (not the RGB to BGR)
+            sample_src = sample_src - np.asarray(VGG_RGB_MEANS, dtype=np.float32)
 
             data[i - offset] = sample_src
-            s_labels[i - offset] = sample_seg
-            c_labels[i - offset] = sample_con
+            labels_seg[i - offset] = sample_seg
+            labels_con[i - offset] = sample_con
 
-        return data, s_labels, c_labels
+        return data, labels_seg, labels_con
+    
+    def mode_size(self, mode='train'):
+        return len(self.data_index[mode])
