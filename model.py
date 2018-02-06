@@ -3,8 +3,6 @@ from tensorflow.contrib import slim as slim
 from tensorflow.contrib.slim.python.slim.nets import resnet_v2
 from tensorflow.contrib.slim.python.slim.nets import resnet_v1
 from tensorflow.contrib import layers
-from tensorflow.contrib.framework.python.ops import arg_scope
-from tensorflow.python.ops import variable_scope
 
 import numpy as np
 import math
@@ -15,6 +13,7 @@ TCONV_ROOT = 8
 DROPOUT_PROB = 0.5
 
 tf.logging.set_verbosity(tf.logging.DEBUG)
+
 
 def bilinear_interp_init(shape, dtype=None, partition_info=None):
     """
@@ -40,6 +39,7 @@ def bilinear_interp_init(shape, dtype=None, partition_info=None):
     return weights
     #return tf.convert_to_tensor(weights, dtype=dtype, name='bilinear_interp_init')
     #return tf.constant(weights, shape=shape, dtype=dtype, name='bilinear_interp_init')
+
 
 def build_custom(img_input):
     upsample_convs = []
@@ -80,6 +80,7 @@ def build_custom(img_input):
 
     return upsample_convs
 
+
 def resnet_v1_50(inputs,
                  num_classes=None,
                  is_training=True,
@@ -87,17 +88,18 @@ def resnet_v1_50(inputs,
                  output_stride=None,
                  reuse=None,
                  scope='resnet_v1_50'):
-  """
-      ResNet-50 model of [1]. See resnet_v1() for arg and return description.
-      (same as what's in slim library now but reversing the 1 stride to accommodate the dcan model)
-  """
-  blocks = [
-      resnet_v1.resnet_v1_block('block1', base_depth=64, num_units=3, stride=1),
-      resnet_v1.resnet_v1_block('block2', base_depth=128, num_units=4, stride=2),
-      resnet_v1.resnet_v1_block('block3', base_depth=256, num_units=6, stride=2),
-      resnet_v1.resnet_v1_block('block4', base_depth=512, num_units=3, stride=2),
-  ]
-  return resnet_v1.resnet_v1(
+    """
+        ResNet-50 model of [1]. See resnet_v1() for arg and return description.
+        (same as what's in slim library now but reversing the 1 stride to accommodate the dcan model)
+    """
+    blocks = [
+        resnet_v1.resnet_v1_block('block1', base_depth=64, num_units=3, stride=1),
+        resnet_v1.resnet_v1_block('block2', base_depth=128, num_units=4, stride=2),
+        resnet_v1.resnet_v1_block('block3', base_depth=256, num_units=6, stride=2),
+        resnet_v1.resnet_v1_block('block4', base_depth=512, num_units=3, stride=2),
+    ]
+
+    return resnet_v1.resnet_v1(
       inputs,
       blocks,
       num_classes,
@@ -106,9 +108,10 @@ def resnet_v1_50(inputs,
       output_stride,
       include_root_block=True,
       reuse=reuse,
-      scope=scope)    
-    
-def build_resnet50_v1(img_input, scope=None):
+      scope=scope)
+
+
+def build_resnet50_v1(img_input):
     """
         Builds resnet50_v1 model from slim, with strides reversed.
         
@@ -118,16 +121,13 @@ def build_resnet50_v1(img_input, scope=None):
     with slim.arg_scope(resnet_v1.resnet_arg_scope()):
         block4, endpoints = resnet_v1_50(img_input, is_training=True, global_pool=False)
 
-    prefix = 'resnet_v1_50'
-    if scope is not None:
-        prefix = f"{scope}/{prefix}"
-        
-    block3 = endpoints[f"{prefix}/block3"]
-    block2 = endpoints[f"{prefix}/block2"]
+    block3 = endpoints['resnet_v1_50/block3']
+    block2 = endpoints['resnet_v1_50/block2']
     
     return block2, block3, block4
 
-def build_resnet50_v2(img_input, scope=None):
+
+def build_resnet50_v2(img_input):
     """
         Builds resnet50_v2 model from slim
         
@@ -135,16 +135,13 @@ def build_resnet50_v2(img_input, scope=None):
     """
 
     with slim.arg_scope(resnet_v2.resnet_arg_scope()):
-        block2, endpoints = resnet_v2.resnet_v2_50(img_input, is_training=True, global_pool=False)
+        block4, endpoints = resnet_v2.resnet_v2_50(img_input, is_training=True, global_pool=False)
 
-    prefix = 'resnet_v2_50'
-    if scope is not None:
-        prefix = f"{scope}/{prefix}"
-        
-    block3 = endpoints[f"{prefix}/block3"]
-    block2 = endpoints[f"{prefix}/block2"]
+    block3 = endpoints['resnet_v2_50/block3']
+    block2 = endpoints['resnet_v2_50/block2']
 
     return block2, block3, block4
+
 
 def upsample_and_fuse(ds_layers, img_size):
     """
@@ -184,23 +181,27 @@ def upsample_and_fuse(ds_layers, img_size):
                                       activation_fn=None, 
                                       scope=f"tconv{i+1}_con")
         contour_outputs.append(net)
-
     
-    s_fuse = tf.add_n(segment_outputs, name="segment_fuse")
-    c_fuse = tf.add_n(contour_outputs, name="contour_fuse")
+    segment_fuse = tf.add_n(segment_outputs, name="segment_fuse")
+    contour_fuse = tf.add_n(contour_outputs, name="contour_fuse")
     
-    return s_fuse, c_fuse
+    return segment_fuse, contour_fuse
 
-def logits(input, ds_model='resnet50_v1', scope=None):
+
+def logits(input, ds_model='resnet50_v1', scope='dcan'):
     """
         Returns the contour and segment logits based on the chosen downsample model. Defaults to 'resnet50_v1'
     """
+    # TODO: is_training
+
     img_size = input.shape.as_list()[1]
     if img_size != input.shape.as_list()[2]:
         raise ValueError("Image input must have equal dimensions")
-    
-    ds_layers = build_resnet50_v1(input, scope=scope)
-    return upsample_and_fuse(ds_layers, img_size)
-    
-    
-    
+
+    if ds_model == 'resnet50_v1':
+        ds_layers = build_resnet50_v1(input)
+
+    with tf.variable_scope(scope):
+        segment_fuse, contour_fuse = upsample_and_fuse(ds_layers, img_size)
+
+    return segment_fuse, contour_fuse

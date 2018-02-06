@@ -1,4 +1,5 @@
 import tensorflow as tf
+from tensorflow.contrib import slim
 import numpy as np
 
 import model
@@ -14,6 +15,7 @@ BATCH_SIZE = 50
 VALIDATION_PCT = 15
 VAL_INTERVAL = 400
 TRAIN_BASE_DIR = 'training-runs'
+
 
 def loss(s_logits, c_logits, s_labels, c_labels):
     """
@@ -32,6 +34,7 @@ def loss(s_logits, c_logits, s_labels, c_labels):
     
     return total_loss
 
+
 def _get_learning_rate(training_step):
     """
         Return the learning rate based on the current step
@@ -41,11 +44,30 @@ def _get_learning_rate(training_step):
         training_step_bucket += TRAINING_STEPS[i]
         if training_step <= training_step_bucket:
             return LEARNING_RATES[i]
-        
+
+
 def _get_train_dir():
+    """
+        Returns the train directory, makes the directory if it doesn't exist
+    """
     cur_train_dir = os.path.join(TRAIN_BASE_DIR, 'tbd')
     tf.gfile.MakeDirs(cur_train_dir)
     return cur_train_dir
+
+
+def _restore_from_checkpoint(model_path, sess, var_filter=None):
+    """
+        Restores variables from given checkpoint file, variables can be filterd by 'var_filter' argument
+    """
+    vars_to_restore = slim.get_model_variables(var_filter)
+    restore_fn = slim.assign_from_checkpoint_fn(model_path, vars_to_restore, ignore_missing_vars=True)
+
+    restore_fn(sess)
+
+
+def _get_trainable_vars():
+    pass
+
 
 def train():
     train_dir = _get_train_dir()
@@ -60,8 +82,10 @@ def train():
         labels_seg = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE], name='s_labels')
         labels_con = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE], name='c_labels')
     
-        logits_seg, logits_con = model.logits(img_input, scope=MODEL_SCOPE)
+    logits_seg, logits_con = model.logits(img_input, scope=MODEL_SCOPE)
         
+    with tf.variable_scope(MODEL_SCOPE):
+
         logits_seg = tf.squeeze(logits_seg, axis=-1)
         logits_con = tf.squeeze(logits_con, axis=-1)
 
@@ -78,8 +102,10 @@ def train():
     global_step = tf.train.get_or_create_global_step()
     increment_global_step = tf.assign(global_step, global_step + 1)
     
+    # Global variable saver
     saver = tf.train.Saver()
     
+    # Run an initializer op to initialize the variables
     init = tf.global_variables_initializer()
     sess.run(init)
     
@@ -90,7 +116,10 @@ def train():
     
     start_step = 1
     
-    # TODO: load model from checkpoint here (see line 189 in speech train)
+    # TODO: parameterize
+    model_path = None
+    if model_path is not None:
+        _restore_from_checkpoint(model_path, sess, var_filter='resnet_v1_50')
     
     tf.logging.info('Training from step: %d ', start_step)
     
@@ -139,4 +168,3 @@ def train():
                 saver.save(sess, checkpoint_path, global_step=training_step)
 
             tf.logging.info(f"Best validation loss so far: {best_valid_loss}")
-        
