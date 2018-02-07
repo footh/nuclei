@@ -15,9 +15,11 @@ BATCH_SIZE = 50
 VALIDATION_PCT = 15
 VAL_INTERVAL = 400
 TRAIN_BASE_DIR = 'training-runs'
+L2_WEIGHT_DECAY  = 0.0001
+DS_MODEL = 'resnet50_v1'
 
 
-def loss(s_logits, c_logits, s_labels, c_labels):
+def loss(logits_seg, logits_con, labels_seg, labels_con):
     """
         Derives a loss function given the segment and contour results and labels
     """
@@ -27,8 +29,8 @@ def loss(s_logits, c_logits, s_labels, c_labels):
     # Means there will be 6 of them - 3 for each label type. FCN code doesn't reveal much about weighting and the paper doesn't 
     # help much either.
     
-    s_loss = tf.losses.sigmoid_cross_entropy(s_labels, s_logits, scope='segment_loss')
-    c_loss = tf.losses.sigmoid_cross_entropy(c_labels, c_logits, scope='contour_loss')
+    s_loss = tf.losses.sigmoid_cross_entropy(labels_seg, logits_seg, scope='segment_loss')
+    c_loss = tf.losses.sigmoid_cross_entropy(labels_con, logits_con, scope='contour_loss')
     
     total_loss = tf.add(s_loss, c_loss, name='total_loss')
     
@@ -82,7 +84,7 @@ def train():
         labels_seg = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE], name='s_labels')
         labels_con = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE], name='c_labels')
     
-    logits_seg, logits_con = model.logits(img_input, scope=MODEL_SCOPE)
+    logits_seg, logits_con = model.logits(img_input, scope=MODEL_SCOPE, l2_weight_decay=L2_WEIGHT_DECAY)
         
     with tf.variable_scope(MODEL_SCOPE):
 
@@ -125,7 +127,7 @@ def train():
     
     # Save graph
     # TODO: more meaningful name (with tweaked parameters?)
-    tf.train.write_graph(sess.graph_def, train_dir, f"{MODEL_SCOPE}.pbtxt")
+    tf.train.write_graph(sess.graph_def, train_dir, f"{MODEL_SCOPE}-{DS_MODEL}.pbtxt")
 
     # Training loop -------------------------
     best_valid_loss = 0

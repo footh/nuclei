@@ -1,84 +1,62 @@
 import tensorflow as tf
-from tensorflow.contrib import slim as slim
+from tensorflow.contrib import slim
 from tensorflow.contrib.slim.python.slim.nets import resnet_v2
 from tensorflow.contrib.slim.python.slim.nets import resnet_v1
 from tensorflow.contrib import layers
+from tensorflow.python.ops import init_ops
 
 import numpy as np
 import math
 
-FEATURE_ROOT = 64
-
-TCONV_ROOT = 8
 DROPOUT_PROB = 0.5
 
 tf.logging.set_verbosity(tf.logging.DEBUG)
 
 
-def bilinear_interp_init(shape, dtype=None, partition_info=None):
+class BilinearInterp(init_ops.Initializer):
     """
-        Keras customer initializer for bilinear upsampling
-        From: https://github.com/MarvinTeichmann/tensorflow-fcn/blob/master/fcn16_vgg.py#L245
+        Bilinear interpolation initializer. Initializes a t-conv weight matrix for bilinear upsampling per this link:
+        http://warmspringwinds.github.io/tensorflow/tf-slim/2016/11/22/upsampling-and-image-segmentation-with-tensorflow-and-tf-slim/        
     """
-    width = shape[0]
-    height = shape[1]
-    f = math.ceil(width / 2.0)
-    c = (2 * f - 1 - f % 2) / (2.0 * f)
-    bilinear = np.zeros((width, height), dtype=dtype.as_numpy_dtype())
-    for x in range(width):
-        for y in range(height):
-            value = (1 - abs(x / f - c)) * (1 - abs(y / f - c))
-            bilinear[x,y] = value
-    
-    tf.logging.debug(bilinear.shape)        
-    weights = np.zeros(shape, dtype=dtype.as_numpy_dtype())
-    for i in range(shape[2]):
-        weights[:,:,i,i] = bilinear
+    def __init__(self, dtype=tf.float32):
+        self.dtype = init_ops._assert_float_dtype(tf.as_dtype(dtype))
+
+    def __call__(self, shape, dtype=None, partition_info=None):
+        if shape[0] != shape[1]:
+            raise ValueError("Bilinear interp init must have equal kernel dimensions")
+
+        if shape[2] != shape[3]:
+            raise ValueError("Bilinear interp init must have equal channel dimensions")
         
-    tf.logging.debug(weights.shape)
-    return weights
-    #return tf.convert_to_tensor(weights, dtype=dtype, name='bilinear_interp_init')
-    #return tf.constant(weights, shape=shape, dtype=dtype, name='bilinear_interp_init')
+        if dtype is None:
+            dtype = self.dtype
+
+        upsample_kernel = self.upsample_filt(shape[0])
+        
+        weights = np.zeros(shape, dtype=self.dtype.as_numpy_dtype())
+        for i in range(shape[2]):
+            weights[:, :, i, i] = upsample_kernel
+            
+        return tf.convert_to_tensor(weights, dtype=dtype, name='bilinear_interp_init')
+
+    def get_config(self):
+        return {"dtype": self.dtype.name}
+        
+    def upsample_filt(self, size):
+        """
+            Make a 2D bilinear kernel suitable for upsampling of the given (h, w) size.
+        """
+        factor = (size + 1) // 2
+        if size % 2 == 1:
+            center = factor - 1
+        else:
+            center = factor - 0.5
+        og = np.ogrid[:size, :size]
+        return (1 - abs(og[0] - center) / factor) * \
+               (1 - abs(og[1] - center) / factor)        
 
 
-def build_custom(img_input):
-    upsample_convs = []
-    
-    # 0
-    net = tf.keras.layers.Conv2D(FEATURE_ROOT, (3,3), padding='same', activation='relu')(img_input)
-    
-    # 1
-    net = tf.keras.layers.Conv2D(FEATURE_ROOT*2, (3,3), padding='same', activation='relu')(net)
-    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
-    
-    # 2
-    net = tf.keras.layers.Conv2D(FEATURE_ROOT*4, (3,3), padding='same', activation='relu')(net)
-    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
-
-    # 3
-    net = tf.keras.layers.Conv2D(FEATURE_ROOT*8, (3,3), padding='same', activation='relu')(net)
-    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
-    tf.logging.debug(f"net after #3: {net}")
-    
-    upsample_convs.append(net)
-    
-    # 4
-    net = tf.keras.layers.Conv2D(FEATURE_ROOT*8, (3,3), padding='same', activation='relu')(net)
-    net = tf.keras.layers.Dropout(rate=DROPOUT_PROB)(net)
-    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
-    tf.logging.debug(f"net after #4: {net}")
-
-    upsample_convs.append(net)
-
-    # 5
-    net = tf.keras.layers.Conv2D(FEATURE_ROOT*16, (3,3), padding='same', activation='relu')(net)
-    net = tf.keras.layers.Dropout(rate=DROPOUT_PROB)(net)
-    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
-    tf.logging.debug(f"net after #5: {net}")
-
-    upsample_convs.append(net)
-
-    return upsample_convs
+bilinear_interp = BilinearInterp
 
 
 def resnet_v1_50(inputs,
@@ -149,25 +127,29 @@ def upsample_and_fuse(ds_layers, img_size):
         fuses each path into one
         
         Returns the two fused layers, one for contours and one for segments
+        
+        kernel size calculated per here:
+        http://warmspringwinds.github.io/tensorflow/tf-slim/2016/11/22/upsampling-and-image-segmentation-with-tensorflow-and-tf-slim/        
+
+        TODO: bilinear upsampling init? This would require a conv->tconv or tconv->conv where the tconv keeps the channels
+        the same and the conv adjusts to the proper channels.
+        TODO: regularization? The dcan paper has L2 in the formula. What about dropout? Slim's resnet I believe has L2, need to check
     """
-    # TODO: figure out strategy behind kernel sizes
-    # TODO: do a 1x1 convolution after t-convolution? The dcan implements it but I think that is based on the referenced
-    # FCN paper and implementation. The dcan paper doesn't mention it explicitly.
-    # TODO: weight initialization on t-convolution layers, ie bilinear upsampling. The impl above I think is flawed.
-    # TODO: regularization? The dcan paper has L2 in the formula. What about dropout? Slim's resnet I believe has L2, need to check
     
     segment_outputs = []
     contour_outputs = []
     
     for i, ds_layer in enumerate(ds_layers):
-        kernel = TCONV_ROOT * 2**(i+1)
-        stride = img_size // ds_layer.shape.as_list()[1]
-        tf.logging.debug(f"layer {i+1} kernel, stride: {kernel, stride}")
+        factor = img_size // ds_layer.shape.as_list()[1]
+        kernel = 2 * factor - factor % 2
+
+        tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
         
+        # Default xavier_initializer is used for the weights here.
         net = layers.conv2d_transpose(ds_layer, 
                                       1, 
                                       kernel, 
-                                      stride, 
+                                      factor, 
                                       padding='SAME', 
                                       activation_fn=None, 
                                       scope=f"tconv{i+1}_seg")
@@ -176,7 +158,7 @@ def upsample_and_fuse(ds_layers, img_size):
         net = layers.conv2d_transpose(ds_layer,
                                       1, 
                                       kernel, 
-                                      stride, 
+                                      factor, 
                                       padding='SAME', 
                                       activation_fn=None, 
                                       scope=f"tconv{i+1}_con")
@@ -188,7 +170,7 @@ def upsample_and_fuse(ds_layers, img_size):
     return segment_fuse, contour_fuse
 
 
-def logits(input, ds_model='resnet50_v1', scope='dcan'):
+def logits(input, ds_model='resnet50_v1', scope='dcan', l2_weight_decay=0.0001):
     """
         Returns the contour and segment logits based on the chosen downsample model. Defaults to 'resnet50_v1'
     """
@@ -201,7 +183,9 @@ def logits(input, ds_model='resnet50_v1', scope='dcan'):
     if ds_model == 'resnet50_v1':
         ds_layers = build_resnet50_v1(input)
 
-    with tf.variable_scope(scope):
+    with tf.variable_scope(scope), slim.arg_scope([layers.conv2d_transpose], 
+                                                  weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
+
         segment_fuse, contour_fuse = upsample_and_fuse(ds_layers, img_size)
 
     return segment_fuse, contour_fuse
