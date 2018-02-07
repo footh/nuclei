@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow.contrib import slim
 import numpy as np
+import os
 
 import model
 import data
@@ -11,11 +12,11 @@ MODEL_SCOPE = "dcan"
 # TODO: parameterize these
 TRAINING_STEPS = [10000, 5000, 5000]
 LEARNING_RATES = [0.001, 0.0005, 0.0001]
-BATCH_SIZE = 50
+BATCH_SIZE = 5
 VALIDATION_PCT = 15
 VAL_INTERVAL = 400
 TRAIN_BASE_DIR = 'training-runs'
-L2_WEIGHT_DECAY  = 0.0001
+L2_WEIGHT_DECAY = 0.0001
 DS_MODEL = 'resnet50_v1'
 
 
@@ -28,11 +29,15 @@ def loss(logits_seg, logits_con, labels_seg, labels_con):
     # auxiliary classifiers are the pre-fused results from the different levels of the convnet. Should that be the same here?
     # Means there will be 6 of them - 3 for each label type. FCN code doesn't reveal much about weighting and the paper doesn't 
     # help much either.
+    tf.logging.info(f"logits_seg.shape: {logits_seg.shape}")
+    tf.logging.info(f"logits_con.shape: {logits_con.shape}")
+    tf.logging.info(f"labels_seg.shape: {labels_seg.shape}")
+    tf.logging.info(f"labels_con.shape: {labels_con.shape}")
+
+    loss_seg = tf.losses.sigmoid_cross_entropy(labels_seg, logits_seg, scope='segment_loss')
+    loss_con = tf.losses.sigmoid_cross_entropy(labels_con, logits_con, scope='contour_loss')
     
-    s_loss = tf.losses.sigmoid_cross_entropy(labels_seg, logits_seg, scope='segment_loss')
-    c_loss = tf.losses.sigmoid_cross_entropy(labels_con, logits_con, scope='contour_loss')
-    
-    total_loss = tf.add(s_loss, c_loss, name='total_loss')
+    total_loss = tf.add(loss_seg, loss_con, name='total_loss')
     
     return total_loss
 
@@ -77,14 +82,18 @@ def train():
     sess = tf.InteractiveSession()
     
     data_processor = data.DataProcessor(img_size=IMG_SIZE, validation_pct=VALIDATION_PCT)
-    
+
     with tf.variable_scope(MODEL_SCOPE):
-    
+        is_training = tf.placeholder(tf.bool)
+
         img_input = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE, 3], name='img_input')
         labels_seg = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE], name='s_labels')
         labels_con = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE], name='c_labels')
     
-    logits_seg, logits_con = model.logits(img_input, scope=MODEL_SCOPE, l2_weight_decay=L2_WEIGHT_DECAY)
+    logits_seg, logits_con = model.logits(img_input,
+                                          scope=MODEL_SCOPE,
+                                          is_training=is_training,
+                                          l2_weight_decay=L2_WEIGHT_DECAY)
         
     with tf.variable_scope(MODEL_SCOPE):
 
@@ -94,13 +103,14 @@ def train():
         total_loss = loss(logits_seg, logits_con, labels_seg, labels_con)
         tf.summary.scalar('total_loss', total_loss)
 
-    with tf.name_scope('train'), tf.control_dependencies(tf.GraphKeys.UPDATE_OPS):
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.name_scope('train'), tf.control_dependencies(update_ops):
 
         lr_input = tf.placeholder(tf.float32, [], name='learning_rate_input')
         train_op = tf.train.AdamOptimizer(lr_input).minimize(total_loss)
 
     # TODO: add accuracy calculation (IOU?, standard accuracy?) here. This will be added to the session run below
-    
+
     global_step = tf.train.get_or_create_global_step()
     increment_global_step = tf.assign(global_step, global_step + 1)
     
@@ -112,9 +122,9 @@ def train():
     sess.run(init)
     
     # Log the number of parameters
-    params = tf.trainable_variables()
-    num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
-    tf.logging.info(f"Total number or trainable parameters: {num_params}")
+    #params = tf.trainable_variables()
+    #num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
+    #tf.logging.info(f"Total number or trainable parameters: {num_params}")
     
     start_step = 1
     
@@ -138,15 +148,17 @@ def train():
     
         x, y_seg, y_con = data_processor.batch(BATCH_SIZE, offset=0, mode='train')
         
-        train_loss, _, _ = sess.run([total_loss, train_op, increment_global_step],
-                                    feed_dict={img_input: x, 
-                                               labels_seg: y_seg, 
+        train_loss, _, g = sess.run([total_loss, train_op, increment_global_step],
+                                    feed_dict={img_input: x,
+                                               labels_seg: y_seg,
                                                labels_con: y_con, 
-                                               lr_input: learning_rate})
+                                               lr_input: learning_rate,
+                                               is_training: True})
 
-        tf.logging.info(f"Step {training_step}: rate {learning_rate}, accuracy TBD, loss {train_loss}")
+        msg = f"Step {training_step}: learning rate {learning_rate}, accuracy TBD, loss {train_loss}, g-money {g}"
+        tf.logging.info(msg)
     
-        if (training_step % VAL_INTERVAL) == 0 or (training_step == training_steps_max):
+        if (training_step % VAL_INTERVAL) == 0 or (training_step == max_training_steps):
             val_size = data_processor.mode_size(mode='valid')
             valid_loss = 0
             
@@ -156,7 +168,8 @@ def train():
                 batch_valid_loss = sess.run([total_loss],
                                             feed_dict={img_input: val_x,
                                                        labels_seg: val_y_seg, 
-                                                       labels_con: val_y_con})
+                                                       labels_con: val_y_con,
+                                                       is_training: False})
     
                 valid_loss += (batch_valid_loss * val_x.shape[0]) / val_size
     

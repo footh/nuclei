@@ -25,7 +25,7 @@ IMG_CONTOUR = 'con'
 IMG_SEGMENT = 'seg'
 
 # TODO: environment variable
-tf.logging.set_verbosity(tf.logging.DEBUG)
+#tf.logging.set_verbosity(tf.logging.DEBUG)
 
 
 def _remove_files(src):
@@ -270,7 +270,7 @@ class DataProcessor:
             sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
 
             if is_training:
-                sample_src = _augment(sample_src)
+                sample_src = self._augment(sample_src)
 
             # Slim's vgg_preprocessing only does the mean subtraction (not the RGB to BGR)
             sample_src = sample_src - np.asarray(VGG_RGB_MEANS, dtype=np.float32)

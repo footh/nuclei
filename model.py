@@ -10,7 +10,7 @@ import math
 
 DROPOUT_PROB = 0.5
 
-tf.logging.set_verbosity(tf.logging.DEBUG)
+#tf.logging.set_verbosity(tf.logging.DEBUG)
 
 
 class BilinearInterp(init_ops.Initializer):
@@ -89,7 +89,7 @@ def resnet_v1_50(inputs,
       scope=scope)
 
 
-def build_resnet50_v1(img_input):
+def build_resnet50_v1(img_input, is_training=True):
     """
         Builds resnet50_v1 model from slim, with strides reversed.
         
@@ -97,7 +97,7 @@ def build_resnet50_v1(img_input):
     """
 
     with slim.arg_scope(resnet_v1.resnet_arg_scope()):
-        block4, endpoints = resnet_v1_50(img_input, is_training=True, global_pool=False)
+        block4, endpoints = resnet_v1_50(img_input, is_training=is_training, global_pool=False)
 
     block3 = endpoints['resnet_v1_50/block3']
     block2 = endpoints['resnet_v1_50/block2']
@@ -105,7 +105,7 @@ def build_resnet50_v1(img_input):
     return block2, block3, block4
 
 
-def build_resnet50_v2(img_input):
+def build_resnet50_v2(img_input, is_training=True):
     """
         Builds resnet50_v2 model from slim
         
@@ -113,7 +113,7 @@ def build_resnet50_v2(img_input):
     """
 
     with slim.arg_scope(resnet_v2.resnet_arg_scope()):
-        block4, endpoints = resnet_v2.resnet_v2_50(img_input, is_training=True, global_pool=False)
+        block4, endpoints = resnet_v2.resnet_v2_50(img_input, is_training=is_training, global_pool=False)
 
     block3 = endpoints['resnet_v2_50/block3']
     block2 = endpoints['resnet_v2_50/block2']
@@ -158,34 +158,33 @@ def upsample_and_fuse(ds_layers, img_size):
         net = layers.conv2d_transpose(ds_layer,
                                       1, 
                                       kernel, 
-                                      factor, 
+                                      factor,
                                       padding='SAME', 
                                       activation_fn=None, 
                                       scope=f"tconv{i+1}_con")
         contour_outputs.append(net)
     
-    segment_fuse = tf.add_n(segment_outputs, name="segment_fuse")
-    contour_fuse = tf.add_n(contour_outputs, name="contour_fuse")
+    fuse_seg = tf.add_n(segment_outputs, name="fuse_seg")
+    fuse_con = tf.add_n(contour_outputs, name="fuse_con")
     
-    return segment_fuse, contour_fuse
+    return fuse_seg, fuse_con
 
 
-def logits(input, ds_model='resnet50_v1', scope='dcan', l2_weight_decay=0.0001):
+def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_weight_decay=0.0001):
     """
         Returns the contour and segment logits based on the chosen downsample model. Defaults to 'resnet50_v1'
     """
-    # TODO: is_training
 
     img_size = input.shape.as_list()[1]
     if img_size != input.shape.as_list()[2]:
         raise ValueError("Image input must have equal dimensions")
 
     if ds_model == 'resnet50_v1':
-        ds_layers = build_resnet50_v1(input)
+        ds_layers = build_resnet50_v1(input, is_training=is_training)
 
     with tf.variable_scope(scope), slim.arg_scope([layers.conv2d_transpose], 
                                                   weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
 
-        segment_fuse, contour_fuse = upsample_and_fuse(ds_layers, img_size)
+        fuse_seg, fuse_con = upsample_and_fuse(ds_layers, img_size)
 
-    return segment_fuse, contour_fuse
+    return fuse_seg, fuse_con
