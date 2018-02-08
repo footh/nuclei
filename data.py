@@ -274,6 +274,9 @@ class DataProcessor:
 
             # Slim's vgg_preprocessing only does the mean subtraction (not the RGB to BGR)
             sample_src = sample_src - np.asarray(VGG_RGB_MEANS, dtype=np.float32)
+            # Masks are black and white (0 and 255). Need to convert to labels.
+            sample_seg = sample_seg / 255.
+            sample_con = sample_con / 255.
 
             data[i - offset] = sample_src
             labels_seg[i - offset] = sample_seg

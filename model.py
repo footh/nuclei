@@ -146,6 +146,7 @@ def upsample_and_fuse(ds_layers, img_size):
         tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
         
         # Default xavier_initializer is used for the weights here.
+        # TODO: this is uniform, should use gaussian per dcan paper?
         net = layers.conv2d_transpose(ds_layer, 
                                       1, 
                                       kernel, 
@@ -182,8 +183,8 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
     if ds_model == 'resnet50_v1':
         ds_layers = build_resnet50_v1(input, is_training=is_training)
 
-    with tf.variable_scope(scope), slim.arg_scope([layers.conv2d_transpose], 
-                                                  weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
+    with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose], 
+                                                                weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
 
         fuse_seg, fuse_con = upsample_and_fuse(ds_layers, img_size)
 

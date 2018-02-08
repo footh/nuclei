@@ -10,14 +10,12 @@ IMG_SIZE = 256
 MODEL_SCOPE = "dcan"
 
 # TODO: parameterize these
-TRAINING_STEPS = [10000, 5000, 5000]
+TRAINING_STEPS = [5000, 3000, 3000]
 LEARNING_RATES = [0.001, 0.0005, 0.0001]
-BATCH_SIZE = 5
 VALIDATION_PCT = 15
-VAL_INTERVAL = 400
+VAL_INTERVAL = 300
 TRAIN_BASE_DIR = 'training-runs'
 L2_WEIGHT_DECAY = 0.0001
-DS_MODEL = 'resnet50_v1'
 
 
 def loss(logits_seg, logits_con, labels_seg, labels_con):
@@ -29,10 +27,12 @@ def loss(logits_seg, logits_con, labels_seg, labels_con):
     # auxiliary classifiers are the pre-fused results from the different levels of the convnet. Should that be the same here?
     # Means there will be 6 of them - 3 for each label type. FCN code doesn't reveal much about weighting and the paper doesn't 
     # help much either.
-    tf.logging.info(f"logits_seg.shape: {logits_seg.shape}")
-    tf.logging.info(f"logits_con.shape: {logits_con.shape}")
-    tf.logging.info(f"labels_seg.shape: {labels_seg.shape}")
-    tf.logging.info(f"labels_con.shape: {labels_con.shape}")
+    
+    #loss_seg = tf.nn.sigmoid_cross_entropy_with_logits(labels=labels_seg, logits=logits_seg, name='loss_seg')
+    #loss_con = tf.nn.sigmoid_cross_entropy_with_logits(labels=labels_con, logits=logits_con, name='loss_con')
+    #mean_loss_seg = tf.reduce_mean(loss_seg, name='mean_loss_seg')
+    #mean_loss_con = tf.reduce_mean(loss_con, name='mean_loss_con')
+    #total_loss = tf.add(mean_loss_seg, mean_loss_con, name='total_loss')
 
     loss_seg = tf.losses.sigmoid_cross_entropy(labels_seg, logits_seg, scope='segment_loss')
     loss_con = tf.losses.sigmoid_cross_entropy(labels_con, logits_con, scope='contour_loss')
@@ -57,19 +57,20 @@ def _get_train_dir():
     """
         Returns the train directory, makes the directory if it doesn't exist
     """
-    cur_train_dir = os.path.join(TRAIN_BASE_DIR, 'tbd')
+    cur_train_dir = os.path.join(TRAIN_BASE_DIR, FLAGS.run_desc)
     tf.gfile.MakeDirs(cur_train_dir)
     return cur_train_dir
 
 
 def _restore_from_checkpoint(model_path, sess, var_filter=None):
     """
-        Restores variables from given checkpoint file, variables can be filterd by 'var_filter' argument
+        Restores variables from given checkpoint file, variables can be filtered by 'var_filter' argument
     """
     vars_to_restore = slim.get_model_variables(var_filter)
     restore_fn = slim.assign_from_checkpoint_fn(model_path, vars_to_restore, ignore_missing_vars=True)
 
     restore_fn(sess)
+    tf.logging.info(f"Successfully restored checkpoint using path: {model_path} with filter: {var_filter}")
 
 
 def _get_trainable_vars():
@@ -77,28 +78,33 @@ def _get_trainable_vars():
 
 
 def train():
-    train_dir = _get_train_dir()
-    
     sess = tf.InteractiveSession()
+
+    if FLAGS.debug_graph:
+        from tensorflow.python import debug as tf_debug
+        sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+
+    train_dir = _get_train_dir()
     
     data_processor = data.DataProcessor(img_size=IMG_SIZE, validation_pct=VALIDATION_PCT)
 
-    with tf.variable_scope(MODEL_SCOPE):
+    with tf.variable_scope(f"{MODEL_SCOPE}/data"):
         is_training = tf.placeholder(tf.bool)
 
         img_input = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE, 3], name='img_input')
-        labels_seg = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE], name='s_labels')
-        labels_con = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE], name='c_labels')
+        labels_seg = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE], name='labels_seg')
+        labels_con = tf.placeholder(tf.float32, [None, IMG_SIZE, IMG_SIZE], name='labels_con')
     
     logits_seg, logits_con = model.logits(img_input,
+                                          ds_model=FLAGS.ds_model,
                                           scope=MODEL_SCOPE,
                                           is_training=is_training,
                                           l2_weight_decay=L2_WEIGHT_DECAY)
         
-    with tf.variable_scope(MODEL_SCOPE):
+    with tf.variable_scope(f"{MODEL_SCOPE}/loss"):
 
-        logits_seg = tf.squeeze(logits_seg, axis=-1)
-        logits_con = tf.squeeze(logits_con, axis=-1)
+        logits_seg = tf.squeeze(logits_seg, axis=-1, name='squeeze_seg')
+        logits_con = tf.squeeze(logits_con, axis=-1, name='squeeze_con')
 
         total_loss = loss(logits_seg, logits_con, labels_seg, labels_con)
         tf.summary.scalar('total_loss', total_loss)
@@ -128,58 +134,100 @@ def train():
     
     start_step = 1
     
-    # TODO: parameterize
-    model_path = None
-    if model_path is not None:
-        _restore_from_checkpoint(model_path, sess, var_filter='resnet_v1_50')
+    # Restore any provided checkpoint. Variables initialized above will be overwritten.
+    if FLAGS.checkpoint_file is not None:
+        _restore_from_checkpoint(FLAGS.checkpoint_file, sess, var_filter=FLAGS.checkpoint_filter)
     
     tf.logging.info('Training from step: %d ', start_step)
     
     # Save graph
-    # TODO: more meaningful name (with tweaked parameters?)
-    tf.train.write_graph(sess.graph_def, train_dir, f"{MODEL_SCOPE}-{DS_MODEL}.pbtxt")
-
+    tf.train.write_graph(sess.graph_def, train_dir, f"{MODEL_SCOPE}-{FLAGS.ds_model}.pbtxt")
+    
     # Training loop -------------------------
-    best_valid_loss = 0
+    best_valid_loss = 1000.
     max_training_steps = np.sum(TRAINING_STEPS)
     for training_step in range(start_step, max_training_steps + 1):
         
         learning_rate = _get_learning_rate(training_step)
     
-        x, y_seg, y_con = data_processor.batch(BATCH_SIZE, offset=0, mode='train')
+        x, y_seg, y_con = data_processor.batch(FLAGS.batch_size, offset=0, mode='train')
         
-        train_loss, _, g = sess.run([total_loss, train_op, increment_global_step],
+        train_loss, _, _ = sess.run([total_loss, train_op, increment_global_step],
                                     feed_dict={img_input: x,
                                                labels_seg: y_seg,
                                                labels_con: y_con, 
                                                lr_input: learning_rate,
                                                is_training: True})
-
-        msg = f"Step {training_step}: learning rate {learning_rate}, accuracy TBD, loss {train_loss}, g-money {g}"
+        
+        msg = f"Step {training_step}: learning rate {learning_rate}, accuracy TBD, loss {train_loss:.5f}"
         tf.logging.info(msg)
     
         if (training_step % VAL_INTERVAL) == 0 or (training_step == max_training_steps):
             val_size = data_processor.mode_size(mode='valid')
             valid_loss = 0
             
-            for val_step in range(0, val_size, BATCH_SIZE):
-                val_x, val_y_seg, val_y_con = data_processor.batch(BATCH_SIZE, offset=val_step, mode='valid')
+            for val_step in range(0, val_size, FLAGS.batch_size):
+                val_x, val_y_seg, val_y_con = data_processor.batch(FLAGS.batch_size, offset=val_step, mode='valid')
     
-                batch_valid_loss = sess.run([total_loss],
+                # TODO: When is_training is set to false, the val loss is very odd. Guess I must leave it at true since
+                # it's using the graph built with batch norm :shrug:
+                batch_valid_loss = sess.run(total_loss,
                                             feed_dict={img_input: val_x,
                                                        labels_seg: val_y_seg, 
                                                        labels_con: val_y_con,
-                                                       is_training: False})
+                                                       is_training: True})
     
                 valid_loss += (batch_valid_loss * val_x.shape[0]) / val_size
     
-            tf.logging.info(f"Step {training_step}: validation loss = {valid_loss}, (N={val_size}")
+            tf.logging.info(f"Step {training_step}: validation loss = {valid_loss:.5f}, (N={val_size})")
     
             # Save the model checkpoint when validation loss improves
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
-                checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_val-loss-{valid_loss:.5f}.ckpt")
+                checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}.ckpt")
                 tf.logging.info(f"Saving best model to {checkpoint_path}-{training_step}")
                 saver.save(sess, checkpoint_path, global_step=training_step)
 
-            tf.logging.info(f"Best validation loss so far: {best_valid_loss}")
+            tf.logging.info(f"Best validation loss so far: {best_valid_loss:.5f}")
+            
+def main(_):
+    #if not FLAGS.dataset_dir:
+    #    raise ValueError('You must supply the dataset directory with --dataset_dir')
+
+    tf.logging.set_verbosity(tf.logging.INFO)
+    
+    train()
+
+            
+tf.app.flags.DEFINE_boolean(
+    'debug_graph', False,
+    'Wrap the training in a debug session')
+
+tf.app.flags.DEFINE_integer(
+    'batch_size', 20,
+    'Batch size used for training')
+
+tf.app.flags.DEFINE_string(
+    'run_desc', 'test_run',
+    'Description for the run, used to name save directory. Should be used to distinguish the run.')
+
+tf.app.flags.DEFINE_string(
+    'ds_model', 'resnet50_v1',
+    'The down-sample model to use')
+
+#----------------------
+# Checkpoint parameters
+#----------------------
+tf.app.flags.DEFINE_string(
+    'checkpoint_file', None,
+    'The checkpoint to initialize training from')
+
+tf.app.flags.DEFINE_string(
+    'checkpoint_filter', None,
+    'The checkpoint filter to target initializing variables. Leaving at None initializes all')
+
+
+FLAGS = tf.app.flags.FLAGS
+
+if __name__ == '__main__':
+    tf.app.run()
