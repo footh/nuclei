@@ -1,9 +1,11 @@
-train/
+train
+test
 .project
 .pydevproject
 docs/
 .idea
 training-runs
+raw-data
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

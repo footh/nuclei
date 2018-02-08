@@ -145,7 +145,7 @@ def full_mask(raw_file_path, with_contours=True):
     return Image.fromarray(mask), Image.fromarray(contour)
 
 
-def setup(src='train'):
+def setup(src='train', with_masks=True):
     """
         Move raw files with full ground truth segment and contour masks over to the src directory. File names
         are id-{type}.png where type is 'src' for source image, 'seg' for segment mask and 'con' for contour mask
@@ -155,13 +155,16 @@ def setup(src='train'):
 
     flist = raw_file_list(src=src)
     for f in flist:
-        mask, contour = full_mask(f)
+        if with_masks:
+            mask, contour = full_mask(f)
+        
         name, ext = os.path.basename(f).split('.')
         print(f"Processing {name}...")
         
         shutil.copy2(f, os.path.join(src, f"{name}-{IMG_SRC}.{ext}"))
-        mask.save(os.path.join(src, f"{name}-{IMG_SEGMENT}.{ext}"))
-        contour.save(os.path.join(src, f"{name}-{IMG_CONTOUR}.{ext}"))
+        if with_masks:
+            mask.save(os.path.join(src, f"{name}-{IMG_SEGMENT}.{ext}"))
+            contour.save(os.path.join(src, f"{name}-{IMG_CONTOUR}.{ext}"))
         
         
 def which_set(file_id, validation_pct, testing_pct):
@@ -186,7 +189,7 @@ def which_set(file_id, validation_pct, testing_pct):
 
 class DataProcessor:
     
-    def __init__(self, src='train', img_size=256, validation_pct=15, testing_pct=0):
+    def __init__(self, src='train', img_size=256, validation_pct=0, testing_pct=0):
         self.src = src
         self.img_size = img_size
         self.validation_pct = validation_pct
