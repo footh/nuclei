@@ -13,7 +13,9 @@ from PIL import Image
 from sklearn.cluster import KMeans
 from skimage import measure
 import hashlib
+import math
 
+IMG_EXT = 'png'
 IMG_EXT = 'png'
 IMG_CHANNELS = 3
 VGG_RGB_MEANS = [123.68, 116.78, 103.94]
@@ -25,7 +27,7 @@ IMG_CONTOUR = 'con'
 IMG_SEGMENT = 'seg'
 
 # TODO: environment variable
-#tf.logging.set_verbosity(tf.logging.DEBUG)
+tf.logging.set_verbosity(tf.logging.DEBUG)
 
 
 def _remove_files(src):
@@ -217,6 +219,34 @@ class DataProcessor:
         tf.logging.info(f"Validation total: {len(self.data_index['valid'])}")
         tf.logging.info(f"Testing total: {len(self.data_index['test'])}")
 
+    def _pad(self, sample):
+        """
+            Adds padding to the sample to any side that is less than the image size. Original image size
+            and adjustments are saved and returned in a dict
+        """
+        rows, cols, _ = sample.shape
+
+        top_adj = bot_adj = left_adj = right_adj = 0
+        if rows < self.img_size:
+            diff = self.img_size - rows
+            top_adj = math.ceil(diff / 2)
+            bot_adj = math.floor(diff / 2)
+
+        if cols < self.img_size:
+            diff = self.img_size - cols
+            left_adj = math.ceil(diff / 2)
+            right_adj = math.floor(diff / 2)
+        tf.logging.debug(f"pre pad sample shape: {sample.shape}")
+
+        sample = np.pad(sample, ((top_adj, bot_adj), (left_adj, right_adj), (0, 0)), mode='symmetric')
+
+        sample_info = {'rows': rows,
+                       'cols': cols,
+                       'tb_adj': (top_adj, bot_adj), 'lr_adj': (left_adj, right_adj)}
+        tf.logging.debug(f"sample_info: {sample_info}")
+        
+        return sample, sample_info
+
     def _sampling_points(self, sample):
         """
             Returns the top and left coordinate to sample image from if any image dimension is greater than
@@ -236,7 +266,23 @@ class DataProcessor:
         # TODO: sample augmentation (random flips, distortion, etc.)
         return sample
 
-    def batch(self, size, offset=0, mode='train'):
+    def _labels(self, sample_id, sample_info, top=0, left=0):
+        sample_seg = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SEGMENT}.{IMG_EXT}")))
+        sample_con = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_CONTOUR}.{IMG_EXT}")))
+
+        sample_seg = np.pad(sample_seg, (sample_info['tb_adj'], sample_info['lr_adj'], (0, 0)), mode='symmetric')
+        sample_con = np.pad(sample_con, (sample_info['tb_adj'], sample_info['lr_adj'], (0, 0)), mode='symmetric')
+
+        sample_seg = sample_seg[top:top + self.img_size, left:left + self.img_size]
+        sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
+
+        # Masks are black and white (0 and 255). Need to convert to labels.
+        sample_seg = sample_seg / 255.
+        sample_con = sample_con / 255.
+
+        return sample_seg, sample_con
+
+    def batch(self, size, offset=0, mode='train', with_labels=True):
         """
             Return a batch of data from the given mode, offset by the given amount
         """
@@ -249,7 +295,8 @@ class DataProcessor:
             sample_count = max(0, min(size, len(source_ids) - offset))
 
         # Initializing return values
-        data = np.zeros((sample_count, self.img_size, self.img_size, IMG_CHANNELS), dtype=np.float32)
+        inputs = np.zeros((sample_count, self.img_size, self.img_size, IMG_CHANNELS), dtype=np.float32)
+        inputs_info = []
         labels_seg = np.zeros((sample_count, self.img_size, self.img_size), dtype=np.float32)
         labels_con = np.zeros((sample_count, self.img_size, self.img_size), dtype=np.float32)
 
@@ -259,33 +306,33 @@ class DataProcessor:
             else:
                 sample_index = np.random.randint(len(source_ids))
 
-            sample = source_ids[sample_index]
-            tf.logging.debug(f"Using sample: {sample}")
+            sample_id = source_ids[sample_index]
+            tf.logging.debug(f"Using sample: {sample_id}")
 
-            sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample}-{IMG_SRC}.{IMG_EXT}")))
-            sample_seg = np.asarray(Image.open(os.path.join(self.src, f"{sample}-{IMG_SEGMENT}.{IMG_EXT}")))
-            sample_con = np.asarray(Image.open(os.path.join(self.src, f"{sample}-{IMG_CONTOUR}.{IMG_EXT}")))
+            sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
+            sample_src, sample_info = self._pad(sample_src)
+            inputs_info.append(sample_info)
 
             # Picking a random sample of the image (if it is larger than the provided img_size)
             top, left = self._sampling_points(sample_src)
             sample_src = sample_src[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
-            sample_seg = sample_seg[top:top + self.img_size, left:left + self.img_size]
-            sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
 
             if is_training:
                 sample_src = self._augment(sample_src)
 
             # Slim's vgg_preprocessing only does the mean subtraction (not the RGB to BGR)
             sample_src = sample_src - np.asarray(VGG_RGB_MEANS, dtype=np.float32)
-            # Masks are black and white (0 and 255). Need to convert to labels.
-            sample_seg = sample_seg / 255.
-            sample_con = sample_con / 255.
 
-            data[i - offset] = sample_src
-            labels_seg[i - offset] = sample_seg
-            labels_con[i - offset] = sample_con
+            inputs[i - offset] = sample_src
+            if with_labels:
+                sample_seg, sample_con = self._labels(sample_id, sample_info, top, left)
+                labels_seg[i - offset] = sample_seg
+                labels_con[i - offset] = sample_con
 
-        return data, labels_seg, labels_con
-    
+        if with_labels:
+            return inputs, inputs_info, labels_seg, labels_con
+        else:
+            return inputs, inputs_info
+
     def mode_size(self, mode='train'):
         return len(self.data_index[mode])
