@@ -2,7 +2,6 @@ train
 test
 .project
 .pydevproject
-docs/
 .idea
 training-runs
 raw-data

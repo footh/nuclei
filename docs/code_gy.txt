@@ -1,0 +1,140 @@
+-------------------------
+    for mask in masks[1:]:
+        mask_img = Image.open(mask)
+        if mask_img.mode is not 'L': raise Exception(f"Mask image is not L mode: {mask}")
+        full.paste(mask_img, mask=mask_img)
+-------------------------
+#     c_tconv1 = tf.keras.layers.Conv2DTranspose(TCONV_OUTPUT_CHANNELS, 
+#                                               (TCONV_ROOT*2, TCONV_ROOT*2), 
+#                                               strides=(TCONV_ROOT, TCONV_ROOT),
+#                                               padding='same',
+#                                               activation='relu',
+#                                               kernel_initializer=bilinear_interp_init)(net)
+#     c_tconv1_output = tf.keras.layers.Conv2D(TCONV_OUTPUT_CHANNELS, (1,1), padding='same', activation='relu')(c_tconv1)
+# 
+#     s_tconv1 = tf.keras.layers.Conv2DTranspose(TCONV_OUTPUT_CHANNELS, 
+#                                               (TCONV_ROOT*2, TCONV_ROOT*2), 
+#                                               strides=(TCONV_ROOT, TCONV_ROOT),
+#                                               padding='same',
+#                                               activation='relu',
+#                                               kernel_initializer=bilinear_interp_init)(net)
+#     s_tconv1_output = tf.keras.layers.Conv2D(TCONV_OUTPUT_CHANNELS, (1,1), padding='same', activation='relu')(s_tconv1)
+# 
+# 
+#     c_tconv2 = tf.keras.layers.Conv2DTranspose(TCONV_OUTPUT_CHANNELS, 
+#                                               (TCONV_ROOT*4, TCONV_ROOT*4), 
+#                                               strides=(TCONV_ROOT*2, TCONV_ROOT*2),
+#                                               padding='same',
+#                                               activation='relu',
+#                                               kernel_initializer=bilinear_interp_init)(net)
+#     c_tconv2_output = tf.keras.layers.Conv2D(TCONV_OUTPUT_CHANNELS, (1,1), padding='same', activation='relu')(c_tconv2)
+# 
+#     s_tconv2 = tf.keras.layers.Conv2DTranspose(TCONV_OUTPUT_CHANNELS, 
+#                                               (TCONV_ROOT*4, TCONV_ROOT*4), 
+#                                               strides=(TCONV_ROOT*2, TCONV_ROOT*2),
+#                                               padding='same',
+#                                               activation='relu',
+#                                               kernel_initializer=bilinear_interp_init)(net)
+#     s_tconv2_output = tf.keras.layers.Conv2D(TCONV_OUTPUT_CHANNELS, (1,1), padding='same', activation='relu')(s_tconv2)
+# 
+# 
+#     c_fuse = tf.add_n([c_tconv1_output, c_tconv2_output])
+#     s_fuse = tf.add_n([s_tconv1_output, s_tconv2_output])
+#     
+#     tf.logging.debug(c_fuse)
+#     tf.logging.debug(s_fuse)
+-------------------------
+FEATURE_ROOT = 64
+
+def build_custom(img_input):
+    upsample_convs = []
+    
+    # 0
+    net = tf.keras.layers.Conv2D(FEATURE_ROOT, (3,3), padding='same', activation='relu')(img_input)
+    
+    # 1
+    net = tf.keras.layers.Conv2D(FEATURE_ROOT*2, (3,3), padding='same', activation='relu')(net)
+    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
+    
+    # 2
+    net = tf.keras.layers.Conv2D(FEATURE_ROOT*4, (3,3), padding='same', activation='relu')(net)
+    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
+
+    # 3
+    net = tf.keras.layers.Conv2D(FEATURE_ROOT*8, (3,3), padding='same', activation='relu')(net)
+    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
+    tf.logging.debug(f"net after #3: {net}")
+    
+    upsample_convs.append(net)
+    
+    # 4
+    net = tf.keras.layers.Conv2D(FEATURE_ROOT*8, (3,3), padding='same', activation='relu')(net)
+    net = tf.keras.layers.Dropout(rate=DROPOUT_PROB)(net)
+    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
+    tf.logging.debug(f"net after #4: {net}")
+
+    upsample_convs.append(net)
+
+    # 5
+    net = tf.keras.layers.Conv2D(FEATURE_ROOT*16, (3,3), padding='same', activation='relu')(net)
+    net = tf.keras.layers.Dropout(rate=DROPOUT_PROB)(net)
+    net = tf.keras.layers.MaxPool2D(pool_size=(2,2), strides=(2,2), padding='same')(net)
+    tf.logging.debug(f"net after #5: {net}")
+
+    upsample_convs.append(net)
+
+    return upsample_convs
+-------------------------
+- This works the same as the current TF version
+def bilinear_interp_init(shape, dtype=None, partition_info=None):
+    """
+        Keras customer initializer for bilinear upsampling
+        From: https://github.com/MarvinTeichmann/tensorflow-fcn/blob/master/fcn16_vgg.py#L245
+    """
+    width = shape[0]
+    height = shape[1]
+    f = math.ceil(width / 2.0)
+    c = (2 * f - 1 - f % 2) / (2.0 * f)
+    bilinear = np.zeros((width, height), dtype=dtype.as_numpy_dtype())
+    for x in range(width):
+        for y in range(height):
+            value = (1 - abs(x / f - c)) * (1 - abs(y / f - c))
+            bilinear[x,y] = value
+    
+    tf.logging.debug(bilinear.shape)        
+    weights = np.zeros(shape, dtype=dtype.as_numpy_dtype())
+    for i in range(shape[2]):
+        weights[:,:,i,i] = bilinear
+        
+    tf.logging.debug(weights.shape)
+    return weights
+    #return tf.convert_to_tensor(weights, dtype=dtype, name='bilinear_interp_init')
+    #return tf.constant(weights, shape=shape, dtype=dtype, name='bilinear_interp_init')
+-------------------------
+def temp_write(step, x, ys, yc):
+    from PIL import Image
+    for i in range(len(x)):
+        tf.logging.info(f"x[i].shape: {x[i].shape}")
+        xi = Image.fromarray(np.asarray(x[i], dtype=np.uint8))
+        xi.save(f"./tmp/{step}-x-{i}.png")
+        
+        ysi = Image.fromarray(ys[i])
+        ysi.save(f"./tmp/{step}-ys-{i}.gif")
+        yci = Image.fromarray(yc[i])
+        yci.save(f"./tmp/{step}-yc-{i}.gif")
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+-------------------------
+

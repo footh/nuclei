@@ -30,3 +30,5 @@ nuclei kaggle challenge
 - Use custom downsample since resnet appears to converge quickly, it might be overkill
 
 - Better way to decay learning rate (see slim net code)
+
+- Validate training data based on thread at competition site
