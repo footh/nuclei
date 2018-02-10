@@ -32,3 +32,5 @@ nuclei kaggle challenge
 - Better way to decay learning rate (see slim net code)
 
 - Validate training data based on thread at competition site
+
+- Do something with focus? dcan project has a preprocessing step that measure the focus of each image.

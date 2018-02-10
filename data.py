@@ -29,6 +29,8 @@ IMG_SEGMENT = 'seg'
 # TODO: environment variable
 tf.logging.set_verbosity(tf.logging.DEBUG)
 
+_DEBUG_ = True
+
 
 def _remove_files(src):
     """
@@ -272,6 +274,10 @@ class DataProcessor:
 
         sample_seg = np.pad(sample_seg, (sample_info['tb_adj'], sample_info['lr_adj'], (0, 0)), mode='symmetric')
         sample_con = np.pad(sample_con, (sample_info['tb_adj'], sample_info['lr_adj'], (0, 0)), mode='symmetric')
+        if _DEBUG_:
+            Image.fromarray(sample_seg).save(f"/tmp/{sample_id}-{IMG_SEGMENT}.{IMG_EXT}")
+            Image.fromarray(sample_con).save(f"/tmp/{sample_id}-{IMG_CONTOUR}.{IMG_EXT}")
+
 
         sample_seg = sample_seg[top:top + self.img_size, left:left + self.img_size]
         sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
@@ -312,6 +318,9 @@ class DataProcessor:
             sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
             sample_src, sample_info = self._pad(sample_src)
             inputs_info.append(sample_info)
+            if _DEBUG_:
+                Image.fromarray(sample_src).save(f"/tmp/{sample_id}-{IMG_SRC}.{IMG_EXT}")
+            
 
             # Picking a random sample of the image (if it is larger than the provided img_size)
             top, left = self._sampling_points(sample_src)
