@@ -6,6 +6,7 @@ import tensorflow as tf
 from tensorflow.python.platform import gfile
 from tensorflow.python.util import compat
 
+import sys
 import os
 import shutil
 import numpy as np
@@ -26,10 +27,13 @@ IMG_SRC = 'src'
 IMG_CONTOUR = 'con'
 IMG_SEGMENT = 'seg'
 
-# TODO: environment variable
-tf.logging.set_verbosity(tf.logging.DEBUG)
+_DEBUG_ = False
 
-_DEBUG_ = True
+
+def SET_DEBUG(val=False):
+    sys.modules[__name__]._DEBUG_ = val
+    tf_setting = tf.logging.DEBUG if val else tf.logging.INFO
+    tf.logging.set_verbosity(tf_setting)
 
 
 def _remove_files(src):
@@ -345,11 +349,16 @@ class DataProcessor:
         else:
             return inputs, inputs_info
 
-    def batch_test(self, offset=0, divisions=2):
+    def batch_test(self, offset=0, overlap_const=2, normalize=True):
         """
-            Return a single sample from the test set (no labels). The sample is returned as a batch of 'img_size' tiles that
-            comes from overlapping segments of the original sample with reflective padding. This result is designed to be run
-            for predictions to later be stitched back together to form a prediction for the original image.
+            Return a single sample from the test set (no labels). The sample is returned a 2D array of 'img_size' tiles that
+            comes from overlapping segments of the original sample with reflective padding. This array row by columss and can be
+            converted into a batch to run for predictions to later be stitched back together to form a prediction for the 
+            original image. The tiles can be normalized with the parameter.
+            
+            The overlap_const determines the tile overlap ( 1/overlap_const is overlap percentage)
+            
+            Ex. shape (4, 2, 256, 256, 3) is 4 rows and two columns of 256x256x3 image tiles
         """
         sample_id = self.data_index['test'][offset]
 
@@ -360,14 +369,19 @@ class DataProcessor:
         tf.logging.debug(f"sample original shape: {sample_src.shape}")
         sample_src = sample_src[:, :, 0:IMG_CHANNELS]
 
-        padding = int(round(self.img_size * (1 - 1.0/divisions)))
+        padding = int(round(self.img_size * (1 - 1.0/overlap_const)))
         tf.logging.debug(f"padding: {padding}")
         
         sample_src = np.pad(sample_src, ((padding, padding), (padding, padding), (0, 0)), mode='reflect')
         tf.logging.debug(f"sample padded shape: {sample_src.shape}")
         prows, pcols, _ = sample_src.shape
+        
+        sample_src = np.asarray(sample_src, dtype=np.float32)
+        if normalize:
+            # Slim's vgg_preprocessing only does the mean subtraction (not the RGB to BGR)
+            sample_src = sample_src - VGG_RGB_MEANS
 
-        step = self.img_size // divisions
+        step = self.img_size // overlap_const
         tf.logging.debug(f"step: {step}")
 
         tiles = []
@@ -380,13 +394,13 @@ class DataProcessor:
         tiles = np.asarray(tiles)
         tf.logging.debug(f"tiles.shape: {tiles.shape}")
 
-        tiles = tiles.reshape(tiles.shape[0] * tiles.shape[1], *tiles.shape[2:])
-
         if _DEBUG_:
-            img = Image.fromarray(sample_src)
+            img = Image.fromarray(np.asarray(sample_src, dtype=np.uint8))
             img.save(f"/tmp/nuclei/master.png")
-            for i, tile in enumerate(tiles):
-                img = Image.fromarray(tile)
+            tiles_debug = tiles.reshape(tiles.shape[0] * tiles.shape[1], *tiles.shape[2:])
+
+            for i, tile in enumerate(tiles_debug):
+                img = Image.fromarray(np.asarray(tile, dtype=np.uint8))
                 img.save(f"/tmp/nuclei/{i}.png")
 
         return tiles
