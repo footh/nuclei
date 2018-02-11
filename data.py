@@ -16,9 +16,9 @@ import hashlib
 import math
 
 IMG_EXT = 'png'
-IMG_EXT = 'png'
 IMG_CHANNELS = 3
 VGG_RGB_MEANS = [123.68, 116.78, 103.94]
+PAD_MODE = 'reflect'
 
 MAX_NUM_PER_CLASS = 2**27 - 1  # ~134M
 
@@ -220,8 +220,11 @@ class DataProcessor:
         tf.logging.info(f"Training total: {len(self.data_index['train'])}")
         tf.logging.info(f"Validation total: {len(self.data_index['valid'])}")
         tf.logging.info(f"Testing total: {len(self.data_index['test'])}")
+        
+    def mode_size(self, mode='train'):
+        return len(self.data_index[mode])        
 
-    def _pad(self, sample):
+    def _pad_to_size(self, sample):
         """
             Adds padding to the sample to any side that is less than the image size. Original image size
             and adjustments are saved and returned in a dict
@@ -240,7 +243,7 @@ class DataProcessor:
             right_adj = math.floor(diff / 2)
         tf.logging.debug(f"pre pad sample shape: {sample.shape}")
 
-        sample = np.pad(sample, ((top_adj, bot_adj), (left_adj, right_adj), (0, 0)), mode='symmetric')
+        sample = np.pad(sample, ((top_adj, bot_adj), (left_adj, right_adj), (0, 0)), mode=PAD_MODE)
 
         sample_info = {'rows': rows,
                        'cols': cols,
@@ -272,8 +275,8 @@ class DataProcessor:
         sample_seg = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SEGMENT}.{IMG_EXT}")))
         sample_con = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_CONTOUR}.{IMG_EXT}")))
 
-        sample_seg = np.pad(sample_seg, (sample_info['tb_adj'], sample_info['lr_adj'], (0, 0)), mode='symmetric')
-        sample_con = np.pad(sample_con, (sample_info['tb_adj'], sample_info['lr_adj'], (0, 0)), mode='symmetric')
+        sample_seg = np.pad(sample_seg, (sample_info['tb_adj'], sample_info['lr_adj'], (0, 0)), mode=PAD_MODE)
+        sample_con = np.pad(sample_con, (sample_info['tb_adj'], sample_info['lr_adj'], (0, 0)), mode=PAD_MODE)
         if _DEBUG_:
             Image.fromarray(sample_seg).save(f"/tmp/{sample_id}-{IMG_SEGMENT}.{IMG_EXT}")
             Image.fromarray(sample_con).save(f"/tmp/{sample_id}-{IMG_CONTOUR}.{IMG_EXT}")
@@ -316,12 +319,11 @@ class DataProcessor:
             tf.logging.debug(f"Using sample: {sample_id}")
 
             sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
-            sample_src, sample_info = self._pad(sample_src)
+            sample_src, sample_info = self._pad_to_size(sample_src)
             inputs_info.append(sample_info)
             if _DEBUG_:
                 Image.fromarray(sample_src).save(f"/tmp/{sample_id}-{IMG_SRC}.{IMG_EXT}")
             
-
             # Picking a random sample of the image (if it is larger than the provided img_size)
             top, left = self._sampling_points(sample_src)
             sample_src = sample_src[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
@@ -343,5 +345,25 @@ class DataProcessor:
         else:
             return inputs, inputs_info
 
-    def mode_size(self, mode='train'):
-        return len(self.data_index[mode])
+
+    def batch_test(self, offset=0, divisions=2):
+        """
+            Return a single sample from the test set (no labels). The sample is returned as a batch of 'img_size' images that 
+            comes from overlapping segments of the original sample with reflective padding. This result is designed to be run
+            for predictions to later be stitched back together to form a prediction for the original image.
+        """
+        source_id = self.data_index['test'][offset]
+
+        sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
+        tf.logging.debug(f"sample original shape: {sample_src.shape}")
+        sample_src = sample_src[:, :, 0:IMG_CHANNELS]
+        rows, cols, _ = sample_src.shape        
+        
+        padding = int(round(self.img_size * (1 - 1.0/divisions)))
+        tf.logging.debug(f"padding: {padding}")
+        
+        sample_src = np.pad(sample_src, ((padding, padding), (padding, padding), (0, 0)), mode='reflect')
+        tf.logging(f"sample padded shape: {sample_src.shape")
+        
+        
+        
