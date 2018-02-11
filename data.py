@@ -68,7 +68,7 @@ def as_images(src='train', size=None):
         Return a list of PIL images from the raw-data directory for the given src. Resized to the size argument if given.
     """
     result = []
-    flist = file_list(src=src)
+    flist = file_list(src)
     for f in flist:
         img = Image.open(f)
         if size is not None:
@@ -345,25 +345,48 @@ class DataProcessor:
         else:
             return inputs, inputs_info
 
-
     def batch_test(self, offset=0, divisions=2):
         """
-            Return a single sample from the test set (no labels). The sample is returned as a batch of 'img_size' images that 
+            Return a single sample from the test set (no labels). The sample is returned as a batch of 'img_size' tiles that
             comes from overlapping segments of the original sample with reflective padding. This result is designed to be run
             for predictions to later be stitched back together to form a prediction for the original image.
         """
-        source_id = self.data_index['test'][offset]
+        sample_id = self.data_index['test'][offset]
 
         sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
+        if _DEBUG_:
+            img = Image.fromarray(sample_src)
+            img.save(f"/tmp/nuclei/original.png")
         tf.logging.debug(f"sample original shape: {sample_src.shape}")
         sample_src = sample_src[:, :, 0:IMG_CHANNELS]
-        rows, cols, _ = sample_src.shape        
-        
+
         padding = int(round(self.img_size * (1 - 1.0/divisions)))
         tf.logging.debug(f"padding: {padding}")
         
         sample_src = np.pad(sample_src, ((padding, padding), (padding, padding), (0, 0)), mode='reflect')
-        tf.logging(f"sample padded shape: {sample_src.shape")
-        
-        
-        
+        tf.logging.debug(f"sample padded shape: {sample_src.shape}")
+        prows, pcols, _ = sample_src.shape
+
+        step = self.img_size // divisions
+        tf.logging.debug(f"step: {step}")
+
+        tiles = []
+        for i in range(0, prows - self.img_size + 1, step):
+            tiles.append([])
+            for j in range(0, pcols - self.img_size + 1, step):
+                tile = sample_src[i:i + self.img_size, j:j + self.img_size, :]
+                tiles[-1].append(tile)
+
+        tiles = np.asarray(tiles)
+        tf.logging.debug(f"tiles.shape: {tiles.shape}")
+
+        tiles = tiles.reshape(tiles.shape[0] * tiles.shape[1], *tiles.shape[2:])
+
+        if _DEBUG_:
+            img = Image.fromarray(sample_src)
+            img.save(f"/tmp/nuclei/master.png")
+            for i, tile in enumerate(tiles):
+                img = Image.fromarray(tile)
+                img.save(f"/tmp/nuclei/{i}.png")
+
+        return tiles
