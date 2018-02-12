@@ -42,6 +42,17 @@ def loss(logits_seg, logits_con, labels_seg, labels_con):
     return total_loss
 
 
+def restore_from_checkpoint(model_path, sess, var_filter=None):
+    """
+        Restores variables from given checkpoint file, variables can be filtered by 'var_filter' argument
+    """
+    vars_to_restore = slim.get_model_variables(var_filter)
+    restore_fn = slim.assign_from_checkpoint_fn(model_path, vars_to_restore, ignore_missing_vars=True)
+
+    restore_fn(sess)
+    tf.logging.info(f"Successfully restored checkpoint using path: {model_path} with filter: {var_filter}")
+
+
 def _get_learning_rate(training_step):
     """
         Return the learning rate based on the current step
@@ -60,17 +71,6 @@ def _get_train_dir():
     cur_train_dir = os.path.join(TRAIN_BASE_DIR, FLAGS.run_desc)
     tf.gfile.MakeDirs(cur_train_dir)
     return cur_train_dir
-
-
-def _restore_from_checkpoint(model_path, sess, var_filter=None):
-    """
-        Restores variables from given checkpoint file, variables can be filtered by 'var_filter' argument
-    """
-    vars_to_restore = slim.get_model_variables(var_filter)
-    restore_fn = slim.assign_from_checkpoint_fn(model_path, vars_to_restore, ignore_missing_vars=True)
-
-    restore_fn(sess)
-    tf.logging.info(f"Successfully restored checkpoint using path: {model_path} with filter: {var_filter}")
 
 
 def _get_trainable_vars():

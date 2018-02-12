@@ -6,7 +6,6 @@ from tensorflow.contrib import layers
 from tensorflow.python.ops import init_ops
 
 import numpy as np
-import math
 
 DROPOUT_PROB = 0.5
 

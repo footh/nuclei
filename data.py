@@ -397,10 +397,11 @@ class DataProcessor:
         if _DEBUG_:
             img = Image.fromarray(np.asarray(sample_src, dtype=np.uint8))
             img.save(f"/tmp/nuclei/master.png")
-            tiles_debug = tiles.reshape(tiles.shape[0] * tiles.shape[1], *tiles.shape[2:])
+            #tiles_debug = tiles.reshape(tiles.shape[0] * tiles.shape[1], *tiles.shape[2:])
 
-            for i, tile in enumerate(tiles_debug):
-                img = Image.fromarray(np.asarray(tile, dtype=np.uint8))
-                img.save(f"/tmp/nuclei/{i}.png")
+            for i in range(tiles.shape[0]):
+                for j in range(tiles.shape[1]):
+                    img = Image.fromarray(np.asarray(tiles[i, j, :], dtype=np.uint8))
+                    img.save(f"/tmp/nuclei/r{i}c{j}.png")
 
         return tiles
