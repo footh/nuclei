@@ -13,6 +13,7 @@ import numpy as np
 from PIL import Image
 from sklearn.cluster import KMeans
 from skimage import measure
+from skimage import morphology
 import hashlib
 import math
 
@@ -108,16 +109,22 @@ def kmeans(img_size=(256, 256), clusters=3):
     return x, km
 
 
-def _draw_contours(src, dest):
+def _draw_contours(src, dest, dilation_val=2):
     """
         Finds contours on src array and writes them to dest array
     """
     contours = measure.find_contours(src, 0.5)  # TODO: investigate this parameter
-    
+
+    result = np.zeros(src.shape, dtype=np.uint8)
     for contour in contours:
         contour = contour.astype(int)
-        dest[contour[:,0], contour[:, 1]] = 255
-        
+        result[contour[:, 0], contour[:, 1]] = 255
+
+    # se = morphology.disk(1)
+    se = morphology.square(dilation_val)
+    result = morphology.dilation(result, se)
+
+    dest = np.maximum(dest, result)
     return dest
 
 
@@ -146,14 +153,12 @@ def full_mask(raw_file_path, with_contours=True):
         mask = np.maximum(mask, mask_img)
         
         if with_contours:
-            # TODO: DCAN paper talks about applying a transformation to the contours to make them
-            # better (thicker I think?)
-            contour = _draw_contours(mask_img, contour)            
+            contour = _draw_contours(mask_img, contour)
         
     return Image.fromarray(mask), Image.fromarray(contour)
 
 
-def setup(src='train', with_masks=True):
+def setup(src='train', with_masks=True, early_stop=None):
     """
         Move raw files with full ground truth segment and contour masks over to the src directory. File names
         are id-{type}.png where type is 'src' for source image, 'seg' for segment mask and 'con' for contour mask
@@ -162,7 +167,10 @@ def setup(src='train', with_masks=True):
     _remove_files(src)
 
     flist = raw_file_list(src=src)
-    for f in flist:
+    for cnt, f in enumerate(flist):
+        if early_stop is not None and cnt > early_stop:
+            break
+
         if with_masks:
             mask, contour = full_mask(f)
         
@@ -271,9 +279,22 @@ class DataProcessor:
         tf.logging.debug(f"top, left: {top}, {left}")
         return top, left
     
-    def _augment(self, sample):
-        # TODO: sample augmentation (random flips, distortion, etc.)
-        return sample
+    def _augment(self, sample, sample_seg, sample_con):
+        if np.random.randint(0, 2):
+            k = np.random.randint(1, 3)
+            sample = np.rot90(sample, k)
+            sample_seg = np.rot90(sample_seg, k)
+            sample_con = np.rot90(sample_con, k)
+            tf.logging.debug(f"Rotated 90 {k} times")
+
+        if np.random.randint(0, 2):
+            sample = sample[:, ::-1]
+            sample_seg = sample[:, ::-1]
+            sample_con = sample[:, ::-1]
+            tf.logging.debug(f"Mirrored on columns")
+
+        # TODO: distortion
+        return sample, sample_seg, sample_con
 
     def _labels(self, sample_id, sample_info, top=0, left=0):
         sample_seg = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SEGMENT}.{IMG_EXT}")))
@@ -285,7 +306,6 @@ class DataProcessor:
             Image.fromarray(sample_seg).save(f"/tmp/{sample_id}-{IMG_SEGMENT}.{IMG_EXT}")
             Image.fromarray(sample_con).save(f"/tmp/{sample_id}-{IMG_CONTOUR}.{IMG_EXT}")
 
-
         sample_seg = sample_seg[top:top + self.img_size, left:left + self.img_size]
         sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
 
@@ -295,7 +315,7 @@ class DataProcessor:
 
         return sample_seg, sample_con
 
-    def batch(self, size, offset=0, mode='train', with_labels=True):
+    def batch(self, size, offset=0, mode='train'):
         """
             Return a batch of data from the given mode, offset by the given amount
         """
@@ -332,22 +352,24 @@ class DataProcessor:
             top, left = self._sampling_points(sample_src)
             sample_src = sample_src[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
 
+            sample_seg, sample_con = self._labels(sample_id, sample_info, top, left)
+
             if is_training:
-                sample_src = self._augment(sample_src)
+                sample_src = self._augment(sample_src, sample_seg, sample_con)
+
+            if _DEBUG_:
+                Image.fromarray(sample_src).save(f"/tmp/{sample_id}-{IMG_SRC}-aug.{IMG_EXT}")
+                Image.fromarray(sample_src).save(f"/tmp/{sample_id}-{IMG_SRC}-aug.{IMG_EXT}")
+                Image.fromarray(sample_src).save(f"/tmp/{sample_id}-{IMG_SRC}-aug.{IMG_EXT}")
 
             # Slim's vgg_preprocessing only does the mean subtraction (not the RGB to BGR)
             sample_src = sample_src - np.asarray(VGG_RGB_MEANS, dtype=np.float32)
 
             inputs[i - offset] = sample_src
-            if with_labels:
-                sample_seg, sample_con = self._labels(sample_id, sample_info, top, left)
-                labels_seg[i - offset] = sample_seg
-                labels_con[i - offset] = sample_con
+            labels_seg[i - offset] = sample_seg
+            labels_con[i - offset] = sample_con
 
-        if with_labels:
             return inputs, inputs_info, labels_seg, labels_con
-        else:
-            return inputs, inputs_info
 
     def batch_test(self, offset=0, overlap_const=2, normalize=True):
         """

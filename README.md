@@ -8,7 +8,7 @@ nuclei kaggle challenge
 - accuracy calculation
 - data augmentation (flip, distortion, also darken? some images are very dark where you can barely see the cells)
 - cleaning up mask data (holes for ex)
-- more work on contour labels (dcan paper talks about running a disk filter)
+- **DONE** more work on contour labels (dcan paper talks about running a disk filter)
 - Tensorboard metrics
 - Running in CloudML
 - Evaluation

@@ -9,6 +9,7 @@ from PIL import Image
 
 OVERLAP_CONST = 2
 
+
 def _debug_output(sample_info, result_seg, result_con):
     fname = f"{sample_info['id']}-{data.IMG_SRC}.{data.IMG_EXT}"
     shutil.copy2(os.path.join('test', fname), os.path.join('debug', fname))
@@ -17,6 +18,7 @@ def _debug_output(sample_info, result_seg, result_con):
     result_con = np.asarray(result_con > 0.2, dtype=np.uint8) * 255
     Image.fromarray(result_seg).save(os.path.join('debug', fname.replace(data.IMG_SRC, data.IMG_SEGMENT)))
     Image.fromarray(result_con).save(os.path.join('debug', fname.replace(data.IMG_SRC, data.IMG_CONTOUR)))
+
 
 def evaluate(trained_checkpoint, pixel_threshold=0.5, contour_threshold=0.5):
     # TODO: parameterize
@@ -91,7 +93,6 @@ def evaluate(trained_checkpoint, pixel_threshold=0.5, contour_threshold=0.5):
         
         _debug_output(sample_info, result_seg, result_con)
 
-    #return result_seg, result_con
 
 def main(_):
     if not FLAGS.trained_checkpoint:
