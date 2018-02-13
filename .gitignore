@@ -5,6 +5,7 @@ test
 .idea
 training-runs
 raw-data
+debug
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

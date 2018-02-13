@@ -351,26 +351,34 @@ class DataProcessor:
 
     def batch_test(self, offset=0, overlap_const=2, normalize=True):
         """
-            Return a single sample from the test set (no labels). The sample is returned a 2D array of 'img_size' tiles that
-            comes from overlapping segments of the original sample with reflective padding. This array row by columss and can be
+            Return a single sample from the test set (no labels). The sample is returned in a 2D array of 'img_size' tiles that
+            comes from overlapping segments of the original sample with reflective padding. This array is row by columns and can be
             converted into a batch to run for predictions to later be stitched back together to form a prediction for the 
-            original image. The tiles can be normalized with the parameter.
+            original image. A dictionary of the information about the sample is returned to aid in reconstruction. The tiles can be 
+            normalized with the parameter.
             
-            The overlap_const determines the tile overlap ( 1/overlap_const is overlap percentage)
+            The overlap_const determines the tile overlap ( 1 - 1/overlap_const is overlap percentage)
             
             Ex. shape (4, 2, 256, 256, 3) is 4 rows and two columns of 256x256x3 image tiles
         """
+        sample_info = {}
+        
         sample_id = self.data_index['test'][offset]
+        sample_info['id'] = sample_id
 
         sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
         if _DEBUG_:
             img = Image.fromarray(sample_src)
             img.save(f"/tmp/nuclei/original.png")
         tf.logging.debug(f"sample original shape: {sample_src.shape}")
+        sample_info['orig_shape'] = sample_src.shape
         sample_src = sample_src[:, :, 0:IMG_CHANNELS]
 
         padding = int(round(self.img_size * (1 - 1.0/overlap_const)))
         tf.logging.debug(f"padding: {padding}")
+        if sample_src.shape[0] < padding or sample_src.shape[1] < padding:
+            raise ValueError(f"Padding size ({padding}) cannot be greater than any image dim ({sample_src.shape[0:2]})")
+        sample_info['padding'] = padding
         
         sample_src = np.pad(sample_src, ((padding, padding), (padding, padding), (0, 0)), mode='reflect')
         tf.logging.debug(f"sample padded shape: {sample_src.shape}")
@@ -383,6 +391,7 @@ class DataProcessor:
 
         step = self.img_size // overlap_const
         tf.logging.debug(f"step: {step}")
+        sample_info['step'] = step
 
         tiles = []
         for i in range(0, prows - self.img_size + 1, step):
@@ -404,4 +413,4 @@ class DataProcessor:
                     img = Image.fromarray(np.asarray(tiles[i, j, :], dtype=np.uint8))
                     img.save(f"/tmp/nuclei/r{i}c{j}.png")
 
-        return tiles
+        return tiles, sample_info
