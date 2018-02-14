@@ -16,6 +16,8 @@ from skimage import measure
 from skimage import morphology
 import hashlib
 import math
+from scipy.ndimage.interpolation import map_coordinates
+from scipy.ndimage.filters import gaussian_filter
 
 IMG_EXT = 'png'
 IMG_CHANNELS = 3
@@ -32,6 +34,7 @@ _DEBUG_ = False
 
 
 def SET_DEBUG(val=False):
+    tf.gfile.MakeDirs('/tmp/nuclei')
     sys.modules[__name__]._DEBUG_ = val
     tf_setting = tf.logging.DEBUG if val else tf.logging.INFO
     tf.logging.set_verbosity(tf_setting)
@@ -203,6 +206,89 @@ def which_set(file_id, validation_pct, testing_pct):
     return result
 
 
+# def elastic_transform(image, alpha, sigma, alpha_affine, random_state=None):
+#     """
+#         Elastic deformation of images as described in [Simard2003]_ (with modifications).
+#        [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
+#          Convolutional Neural Networks applied to Visual Document Analysis", in
+#          Proc. of the International Conference on Document Analysis and
+#          Recognition, 2003.
+# 
+#         Based on https://gist.github.com/erniejunior/601cdf56d2b424757de5
+#     """
+#     if random_state is None:
+#         random_state = np.random.RandomState(None)
+# 
+#     shape = image.shape
+#     shape_size = shape[:2]
+#     
+#     # Random affine
+#     center_square = np.float32(shape_size) // 2
+#     square_size = min(shape_size) // 3
+#     pts1 = np.float32([center_square + square_size, [center_square[0] + square_size, center_square[1] - square_size], center_square - square_size])
+#     pts2 = pts1 + random_state.uniform(-alpha_affine, alpha_affine, size=pts1.shape).astype(np.float32)
+#     M = cv2.getAffineTransform(pts1, pts2)
+#     image = cv2.warpAffine(image, M, shape_size[::-1], borderMode=cv2.BORDER_REFLECT_101)
+# 
+#     dx = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha
+#     dy = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha
+#     dz = np.zeros_like(dx)
+# 
+#     x, y, z = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]), np.arange(shape[2]))
+#     indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1)), np.reshape(z, (-1, 1))
+# 
+#     return map_coordinates(image, indices, order=1, mode='reflect').reshape(shape)
+
+
+def elastic_transform(image, alpha, sigma, random_state=None):
+    """Elastic deformation of images as described in [Simard2003]_.
+    .. [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
+       Convolutional Neural Networks applied to Visual Document Analysis", in
+       Proc. of the International Conference on Document Analysis and
+       Recognition, 2003.
+    """
+    if random_state is None:
+        random_state = np.random.RandomState(None)
+
+    shape = image.shape
+    print(f"shape: {shape}")
+
+    dx = gaussian_filter((random_state.rand(*shape[0:2]) * 2 - 1), sigma, mode="constant", cval=0) * alpha
+    dy = gaussian_filter((random_state.rand(*shape[0:2]) * 2 - 1), sigma, mode="constant", cval=0) * alpha
+    x, y = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing='ij')
+    indices = np.reshape(x+dx, (-1, 1)), np.reshape(y+dy, (-1, 1))
+
+    result = np.zeros(shape, dtype=image.dtype)
+    if len(shape) == 2:
+        result[:, :] = map_coordinates(image, indices, order=1).reshape(shape[0:2])
+    else:
+        for i in range(shape[2]):
+            result[:, :, i] = map_coordinates(image[:, :, i], indices, order=1).reshape(shape[0:2])
+
+    return result
+
+
+def test():
+    img = np.asarray(Image.open('train/00ae65c1c6631ae6f2be1a449902976e6eb8483bf6b0740d00530220832c6d3e-src.png'))
+    imgs = np.asarray(Image.open('train/00ae65c1c6631ae6f2be1a449902976e6eb8483bf6b0740d00530220832c6d3e-seg.png'))
+    imgs = np.expand_dims(imgs, axis=-1)
+    imgc = np.asarray(Image.open('train/00ae65c1c6631ae6f2be1a449902976e6eb8483bf6b0740d00530220832c6d3e-con.png'))
+    imgc = np.expand_dims(imgc, axis=-1)
+    print(f"{img.shape}, {imgs.shape}, {imgc.shape}")
+    
+    all_img = np.concatenate([img, imgs, imgc], axis=-1)
+    print(f"all_img.shape: {all_img.shape}")
+    
+    imgt = elastic_transform(all_img, all_img.shape[1]*2, all_img.shape[1]*0.08)
+
+    imgts = np.squeeze(imgt[:,:,4:5])
+    imgtc = np.squeeze(imgt[:,:,5:6])
+    
+    Image.fromarray(imgt[:,:,0:4]).save('/tmp/nuclei/test-src.png')
+    Image.fromarray(imgts).save('/tmp/nuclei/test-seg.png')
+    Image.fromarray(imgtc).save('/tmp/nuclei/test-con.png')
+    
+
 class DataProcessor:
     
     def __init__(self, src='train', img_size=256, validation_pct=0, testing_pct=0):
@@ -253,24 +339,21 @@ class DataProcessor:
             diff = self.img_size - cols
             left_adj = math.ceil(diff / 2)
             right_adj = math.floor(diff / 2)
-        tf.logging.debug(f"pre pad sample shape: {sample.shape}")
 
         sample = np.pad(sample, ((top_adj, bot_adj), (left_adj, right_adj), (0, 0)), mode=PAD_MODE)
 
-        sample_info = {'rows': rows,
+        pad_info = {'rows': rows,
                        'cols': cols,
                        'tb_adj': (top_adj, bot_adj), 'lr_adj': (left_adj, right_adj)}
-        tf.logging.debug(f"sample_info: {sample_info}")
+        tf.logging.debug(f"pad_info: {pad_info}")
         
-        return sample, sample_info
+        return sample, pad_info
 
     def _sampling_points(self, sample):
         """
             Returns the top and left coordinate to sample image from if any image dimension is greater than
             image size
         """
-        tf.logging.debug(f"sample shape: {sample.shape}")
-
         top_max = sample.shape[0] - self.img_size + 1
         left_max = sample.shape[1] - self.img_size + 1
 
@@ -281,37 +364,33 @@ class DataProcessor:
     
     def _augment(self, sample, sample_seg, sample_con):
         if np.random.randint(0, 2):
-            k = np.random.randint(1, 3)
+            k = np.random.randint(1, 4)
             sample = np.rot90(sample, k)
             sample_seg = np.rot90(sample_seg, k)
             sample_con = np.rot90(sample_con, k)
-            tf.logging.debug(f"Rotated 90 {k} times")
+            tf.logging.debug(f"Rotated 90 degrees {k} times")
 
         if np.random.randint(0, 2):
             sample = sample[:, ::-1]
-            sample_seg = sample[:, ::-1]
-            sample_con = sample[:, ::-1]
+            sample_seg = sample_seg[:, ::-1]
+            sample_con = sample_con[:, ::-1]
             tf.logging.debug(f"Mirrored on columns")
 
         # TODO: distortion
         return sample, sample_seg, sample_con
 
-    def _labels(self, sample_id, sample_info, top=0, left=0):
+    def _labels(self, sample_id, pad_info, top=0, left=0):
         sample_seg = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SEGMENT}.{IMG_EXT}")))
         sample_con = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_CONTOUR}.{IMG_EXT}")))
 
-        sample_seg = np.pad(sample_seg, (sample_info['tb_adj'], sample_info['lr_adj'], (0, 0)), mode=PAD_MODE)
-        sample_con = np.pad(sample_con, (sample_info['tb_adj'], sample_info['lr_adj'], (0, 0)), mode=PAD_MODE)
+        sample_seg = np.pad(sample_seg, (pad_info['tb_adj'], pad_info['lr_adj']), mode=PAD_MODE)
+        sample_con = np.pad(sample_con, (pad_info['tb_adj'], pad_info['lr_adj']), mode=PAD_MODE)
         if _DEBUG_:
-            Image.fromarray(sample_seg).save(f"/tmp/{sample_id}-{IMG_SEGMENT}.{IMG_EXT}")
-            Image.fromarray(sample_con).save(f"/tmp/{sample_id}-{IMG_CONTOUR}.{IMG_EXT}")
+            Image.fromarray(sample_seg).save(f"/tmp/nuclei/{sample_id}-{IMG_SEGMENT}-pad.{IMG_EXT}")
+            Image.fromarray(sample_con).save(f"/tmp/nuclei/{sample_id}-{IMG_CONTOUR}-pad.{IMG_EXT}")
 
         sample_seg = sample_seg[top:top + self.img_size, left:left + self.img_size]
         sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
-
-        # Masks are black and white (0 and 255). Need to convert to labels.
-        sample_seg = sample_seg / 255.
-        sample_con = sample_con / 255.
 
         return sample_seg, sample_con
 
@@ -343,33 +422,40 @@ class DataProcessor:
             tf.logging.debug(f"Using sample: {sample_id}")
 
             sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
-            sample_src, sample_info = self._pad_to_size(sample_src)
-            inputs_info.append(sample_info)
+            tf.logging.debug(f"pre-pad sample_src.shape: {sample_src.shape}")
+            sample_src, pad_info = self._pad_to_size(sample_src)
+            tf.logging.debug(f"post-pad sample_src.shape: {sample_src.shape}")
+            inputs_info.append(pad_info)
             if _DEBUG_:
-                Image.fromarray(sample_src).save(f"/tmp/{sample_id}-{IMG_SRC}.{IMG_EXT}")
+                Image.fromarray(sample_src).save(f"/tmp/nuclei/{sample_id}-{IMG_SRC}-pad.{IMG_EXT}")
             
             # Picking a random sample of the image (if it is larger than the provided img_size)
             top, left = self._sampling_points(sample_src)
             sample_src = sample_src[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
 
-            sample_seg, sample_con = self._labels(sample_id, sample_info, top, left)
+            # Get the ground truth
+            sample_seg, sample_con = self._labels(sample_id, pad_info, top, left)
 
+            # Augment the data if training
             if is_training:
-                sample_src = self._augment(sample_src, sample_seg, sample_con)
-
-            if _DEBUG_:
-                Image.fromarray(sample_src).save(f"/tmp/{sample_id}-{IMG_SRC}-aug.{IMG_EXT}")
-                Image.fromarray(sample_src).save(f"/tmp/{sample_id}-{IMG_SRC}-aug.{IMG_EXT}")
-                Image.fromarray(sample_src).save(f"/tmp/{sample_id}-{IMG_SRC}-aug.{IMG_EXT}")
+                sample_src, sample_seg, sample_con = self._augment(sample_src, sample_seg, sample_con)
+ 
+                if _DEBUG_:
+                    Image.fromarray(sample_src).save(f"/tmp/nuclei/{sample_id}-{IMG_SRC}-aug.{IMG_EXT}")
+                    Image.fromarray(sample_seg).save(f"/tmp/nuclei/{sample_id}-{IMG_SEGMENT}-aug.{IMG_EXT}")
+                    Image.fromarray(sample_con).save(f"/tmp/nuclei/{sample_id}-{IMG_CONTOUR}-aug.{IMG_EXT}")
 
             # Slim's vgg_preprocessing only does the mean subtraction (not the RGB to BGR)
             sample_src = sample_src - np.asarray(VGG_RGB_MEANS, dtype=np.float32)
+            # Masks are black and white (0 and 255). Need to convert to labels.
+            sample_seg = sample_seg / 255.
+            sample_con = sample_con / 255.
 
             inputs[i - offset] = sample_src
             labels_seg[i - offset] = sample_seg
             labels_con[i - offset] = sample_con
 
-            return inputs, inputs_info, labels_seg, labels_con
+        return inputs, inputs_info, labels_seg, labels_con
 
     def batch_test(self, offset=0, overlap_const=2, normalize=True):
         """
