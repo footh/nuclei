@@ -136,7 +136,7 @@ def train():
     
     # Restore any provided checkpoint. Variables initialized above will be overwritten.
     if FLAGS.checkpoint_file is not None:
-        _restore_from_checkpoint(FLAGS.checkpoint_file, sess, var_filter=FLAGS.checkpoint_filter)
+        restore_from_checkpoint(FLAGS.checkpoint_file, sess, var_filter=FLAGS.checkpoint_filter)
     
     tf.logging.info('Training from step: %d ', start_step)
     
@@ -189,7 +189,8 @@ def train():
                 saver.save(sess, checkpoint_path, global_step=training_step)
 
             tf.logging.info(f"Best validation loss so far: {best_valid_loss:.5f}")
-            
+
+
 def main(_):
     #if not FLAGS.dataset_dir:
     #    raise ValueError('You must supply the dataset directory with --dataset_dir')
@@ -204,7 +205,7 @@ tf.app.flags.DEFINE_boolean(
     'Wrap the training in a debug session')
 
 tf.app.flags.DEFINE_integer(
-    'batch_size', 20,
+    'batch_size', 5,
     'Batch size used for training')
 
 tf.app.flags.DEFINE_string(
@@ -215,9 +216,9 @@ tf.app.flags.DEFINE_string(
     'ds_model', 'resnet50_v1',
     'The down-sample model to use')
 
-#----------------------
+# ----------------------
 # Checkpoint parameters
-#----------------------
+# ----------------------
 tf.app.flags.DEFINE_string(
     'checkpoint_file', None,
     'The checkpoint to initialize training from')

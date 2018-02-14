@@ -51,12 +51,12 @@ def _remove_files(src):
         list(map(_remove_files, [os.path.join(src, fi) for fi in os.listdir(src)])) 
 
 
-def file_list(src_dir):
+def file_list(src_dir, fname_wildcard='*'):
     """
         Return a list of files from the src_dir directory
     """
     result = []
-    search_path = os.path.join(src_dir, f"*.{IMG_EXT}")
+    search_path = os.path.join(src_dir, f"{fname_wildcard}.{IMG_EXT}")
     for img_path in gfile.Glob(search_path):
         result.append(img_path)
 
@@ -184,8 +184,40 @@ def setup(src='train', with_masks=True, early_stop=None):
         if with_masks:
             mask.save(os.path.join(src, f"{name}-{IMG_SEGMENT}.{ext}"))
             contour.save(os.path.join(src, f"{name}-{IMG_CONTOUR}.{ext}"))
-        
-        
+
+
+def ratio(src='train'):
+    """
+        Retrieve the ratios of segment and contour masks
+    """
+    seg_pixels = 0
+    seg_total = 0
+
+    seg_files = file_list(src, fname_wildcard=f"*-{IMG_SEGMENT}")
+    tf.logging.info(f"Segment files found: {len(seg_files)}")
+    for seg_file in seg_files:
+        seg = np.asarray(Image.open(seg_file))
+        seg_total += np.prod(seg.shape)
+        seg_pixels += np.sum(seg > 0)
+
+    con_pixels = 0
+    con_total = 0
+
+    con_files = file_list(src, fname_wildcard=f"*-{IMG_CONTOUR}")
+    tf.logging.info(f"Contour files found: {len(con_files)}")
+    for con_file in con_files:
+        con = np.asarray(Image.open(con_file))
+        con_total += np.prod(con.shape)
+        con_pixels += np.sum(con > 0)
+
+    assert(seg_total == con_total)
+
+    seg_ratio = seg_pixels / (seg_total * 2)
+    con_ratio = con_pixels / (con_total * 2)
+
+    return seg_ratio, con_ratio
+
+
 def which_set(file_id, validation_pct, testing_pct):
     """
         Determines which data partition the file should belong to.
@@ -204,40 +236,6 @@ def which_set(file_id, validation_pct, testing_pct):
         result = 'train'
     
     return result
-
-
-# def elastic_transform(image, alpha, sigma, alpha_affine, random_state=None):
-#     """
-#         Elastic deformation of images as described in [Simard2003]_ (with modifications).
-#        [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
-#          Convolutional Neural Networks applied to Visual Document Analysis", in
-#          Proc. of the International Conference on Document Analysis and
-#          Recognition, 2003.
-# 
-#         Based on https://gist.github.com/erniejunior/601cdf56d2b424757de5
-#     """
-#     if random_state is None:
-#         random_state = np.random.RandomState(None)
-# 
-#     shape = image.shape
-#     shape_size = shape[:2]
-#     
-#     # Random affine
-#     center_square = np.float32(shape_size) // 2
-#     square_size = min(shape_size) // 3
-#     pts1 = np.float32([center_square + square_size, [center_square[0] + square_size, center_square[1] - square_size], center_square - square_size])
-#     pts2 = pts1 + random_state.uniform(-alpha_affine, alpha_affine, size=pts1.shape).astype(np.float32)
-#     M = cv2.getAffineTransform(pts1, pts2)
-#     image = cv2.warpAffine(image, M, shape_size[::-1], borderMode=cv2.BORDER_REFLECT_101)
-# 
-#     dx = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha
-#     dy = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha
-#     dz = np.zeros_like(dx)
-# 
-#     x, y, z = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]), np.arange(shape[2]))
-#     indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1)), np.reshape(z, (-1, 1))
-# 
-#     return map_coordinates(image, indices, order=1, mode='reflect').reshape(shape)
 
 
 def elastic_transform(image, alpha, sigma, random_state=None):
@@ -268,7 +266,7 @@ def elastic_transform(image, alpha, sigma, random_state=None):
     return result
 
 
-def test():
+def et_test():
     img = np.asarray(Image.open('train/00ae65c1c6631ae6f2be1a449902976e6eb8483bf6b0740d00530220832c6d3e-src.png'))
     imgs = np.asarray(Image.open('train/00ae65c1c6631ae6f2be1a449902976e6eb8483bf6b0740d00530220832c6d3e-seg.png'))
     imgs = np.expand_dims(imgs, axis=-1)
@@ -281,8 +279,8 @@ def test():
     
     imgt = elastic_transform(all_img, all_img.shape[1]*2, all_img.shape[1]*0.08)
 
-    imgts = np.squeeze(imgt[:,:,4:5])
-    imgtc = np.squeeze(imgt[:,:,5:6])
+    imgts = np.squeeze(imgt[:, :, 4:5])
+    imgtc = np.squeeze(imgt[:, :, 5:6])
     
     Image.fromarray(imgt[:,:,0:4]).save('/tmp/nuclei/test-src.png')
     Image.fromarray(imgts).save('/tmp/nuclei/test-seg.png')
@@ -455,7 +453,7 @@ class DataProcessor:
             labels_seg[i - offset] = sample_seg
             labels_con[i - offset] = sample_con
 
-        return inputs, inputs_info, labels_seg, labels_con
+        return inputs, labels_seg, labels_con
 
     def batch_test(self, offset=0, overlap_const=2, normalize=True):
         """
