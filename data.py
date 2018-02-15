@@ -289,7 +289,12 @@ def et_test():
 
 class DataProcessor:
     
-    def __init__(self, src='train', img_size=256, validation_pct=0, testing_pct=0):
+    def __init__(self, src='train', img_size=256, validation_pct=0, testing_pct=0, valid_same=True):
+        """
+            Build data processor for yielding train, valid and test data
+            
+            'valid_same' parameter will assure the sampling points on 'valid' mode will be the same across calls
+        """
         self.src = src
         self.img_size = img_size
         self.validation_pct = validation_pct
@@ -297,6 +302,10 @@ class DataProcessor:
         self.data_index = {'train': [], 'valid': [], 'test': []}
 
         self._generate_data_index()
+
+        self.valid_seeds = None
+        if valid_same:
+             self.valid_seeds = np.random.rand(self.mode_size(mode='valid'), 2)
 
     def _generate_data_index(self):
         """
@@ -347,17 +356,26 @@ class DataProcessor:
         
         return sample, pad_info
 
-    def _sampling_points(self, sample):
+    def _sampling_points(self, sample, seed=None):
         """
             Returns the top and left coordinate to sample image from if any image dimension is greater than
             image size
+            
+            'seed' is a tuple with values on [0,1) used to generate the top and left points
         """
         top_max = sample.shape[0] - self.img_size + 1
         left_max = sample.shape[1] - self.img_size + 1
 
-        top = np.random.randint(0, top_max)
-        left = np.random.randint(0, left_max)
+        if seed is not None:
+            top = int(seed[0] * top_max)
+            left = int(seed[1] * left_max)
+            tf.logging.debug(f"Using seed: {seed}")
+        else:
+            top = np.random.randint(0, top_max)
+            left = np.random.randint(0, left_max)
+            tf.logging.debug(f"Picking randomly")
         tf.logging.debug(f"top, left: {top}, {left}")
+        
         return top, left
     
     def _augment(self, sample, sample_seg, sample_con):
@@ -396,6 +414,8 @@ class DataProcessor:
         """
             Return a batch of data from the given mode, offset by the given amount
         """
+        assert(mode == 'train' or mode == 'valid')
+        
         is_training = (mode == 'train')
 
         source_ids = self.data_index[mode]
@@ -427,8 +447,12 @@ class DataProcessor:
             if _DEBUG_:
                 Image.fromarray(sample_src).save(f"/tmp/nuclei/{sample_id}-{IMG_SRC}-pad.{IMG_EXT}")
             
-            # Picking a random sample of the image (if it is larger than the provided img_size)
-            top, left = self._sampling_points(sample_src)
+            # Picking a random sample of the image (if it is larger than the provided img_size).
+            # Validation data will use deterministic seeds if configured.
+            seed = None
+            if not is_training and self.valid_seeds is not None:
+                seed = self.valid_seeds[sample_index]
+            top, left = self._sampling_points(sample_src, seed=seed)
             sample_src = sample_src[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
 
             # Get the ground truth

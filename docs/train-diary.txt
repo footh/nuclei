@@ -1,0 +1,22 @@
+TRAINING NOTES:
+(For these notes, each run will only detail changes from previous runs)
+
+First attempt: [5000, 3000, 3000], [0.001, 0.0005, 0.0001]. One pixel contours. Default init
+Converged to ~0.13 after a few thousand steps. Discarded
+
+Used resnet init:
+Converged to 0.12611 after 1200 steps then val loss just got worse. Conclusion: definitely start with resnet, but overfit very quickly.
+
+Used thicker contours and rotation and flip data aug: 
+Took much longer to converge, hit a val loss of 0.14941 on the last step (11,000) which shows signs that it probably could benefit from more training. BUT the val
+loss at step 2700 was 0.15522. So lots of steps with little change.
+
+Keeping resnet init, thicker contours, basic data aug
+[5000,5000,5000] (same learning rates), Adam epsilon 0.1 (vs 1e-8):
+Learning slowed a ton, 0.18200 on step 9900, let it run for a couple thousand more (at the really low learning rate) and there was no improvement so killed it
+
+[10000, 5000, 5000], [0.001, 0.0007, 0.0003], Adam epsilon 0.1:
+Similar to above run but extending the steps and increasing the learning rates to see if it would move towards the pre-epsilon change results. Achieved 0.16770 on
+step 18300. The five best were at steps 12000 (at 0.17468), 12600, 13500, 15600 and 18300. So not sure if even more steps with higher rate lingering longer would work? 
+The training losses vary greatly (obviously with batch size 5), but the eyeball test seem to show a pretty close correlation to val loss. Could this mean less 
+overfitting? Unsure what to do with the epsilon experiment. 

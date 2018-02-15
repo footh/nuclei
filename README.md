@@ -13,10 +13,12 @@ nuclei kaggle challenge
 - Running in CloudML
 - Evaluation
 - **DONE** Overlap-tile stitching or some other strategy to deal with image size differences
-- Validation run does random cropping so it's not the same each time, should make more consistent (could choose the top/left when index is built?)
+- **DONE** Validation run does random cropping so it's not the same each time, should make more consistent (could choose the top/left when index is built?)
 - Freeze weights in resnet - see slim nets trainer for reference
 - Use custom downsample since resnet appears to converge quickly, it might be overkill
-- Better way to decay learning rate (see slim net code)
+- **DONE** Better way to decay learning rate (see slim net code) 
+  Conclusion: not sure if this should be done with ADAM optimizer. It would be easy to implement with tf.train.exponential_decay, but ADAM already does a form of exponential decay so the step version might be OK. 
+  If optimizer is changed, consider using it. Maybe use exponential_decay with MomentumOptimizer (dcan project uses that)
 - Validate training data based on thread at competition site
 - Do something with focus? dcan project has a preprocessing step that measure the focus of each image.
 - See file on different class modalities. Should group batches in these modes to see how mode does  in each one.
@@ -26,3 +28,4 @@ edge at least half the time." https://www.kaggle.com/c/data-science-bowl-2018/di
 - See here https://github.com/tensorlayer/tensorlayer/blob/master/tensorlayer/layers.py. An upsampling layer which 
 just uses tensorflow resize. Back prop flows through but are there learnable weights involved?
 - Pyramid the larger images? See vooban link for another link on doing that
+- optimizer: https://www.quora.com/Why-do-the-state-of-the-art-deep-learning-models-like-ResNet-and-DenseNet-use-SGD-with-momentum-over-Adam-for-training and https://stackoverflow.com/questions/36162180/gradient-descent-vs-adagrad-vs-momentum-in-tensorflow

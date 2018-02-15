@@ -10,8 +10,9 @@ IMG_SIZE = 256
 MODEL_SCOPE = "dcan"
 
 # TODO: parameterize these
-TRAINING_STEPS = [5000, 3000, 3000]
-LEARNING_RATES = [0.001, 0.0005, 0.0001]
+TRAINING_STEPS = [10000, 5000, 5000]
+LEARNING_RATES = [0.001, 0.0007, 0.0003]
+ADAM_EPISILON = 0.1
 VALIDATION_PCT = 15
 VAL_INTERVAL = 300
 TRAIN_BASE_DIR = 'training-runs'
@@ -72,6 +73,13 @@ def _get_train_dir():
     tf.gfile.MakeDirs(cur_train_dir)
     return cur_train_dir
 
+def _write_notes(train_dir):
+    response = input("Training notes? (ENTER skips) ")
+    if response is not None:
+        desc_file = os.path.join(train_dir, 'notes.txt')
+        with open(desc_file, 'w') as f:
+            f.write(response)
+
 
 def _get_trainable_vars():
     pass
@@ -85,6 +93,8 @@ def train():
         sess = tf_debug.LocalCLIDebugWrapperSession(sess)
 
     train_dir = _get_train_dir()
+    if FLAGS.notes:
+        _write_notes(train_dir)
     
     data_processor = data.DataProcessor(img_size=IMG_SIZE, validation_pct=VALIDATION_PCT)
 
@@ -113,7 +123,7 @@ def train():
     with tf.name_scope('train'), tf.control_dependencies(update_ops):
 
         lr_input = tf.placeholder(tf.float32, [], name='learning_rate_input')
-        train_op = tf.train.AdamOptimizer(lr_input).minimize(total_loss)
+        train_op = tf.train.AdamOptimizer(learning_rate=lr_input, epsilon=ADAM_EPISILON).minimize(total_loss)
 
     # TODO: add accuracy calculation (IOU?, standard accuracy?) here. This will be added to the session run below
 
@@ -122,6 +132,11 @@ def train():
     
     # Global variable saver
     saver = tf.train.Saver()
+
+    # Merge all the summaries and write them out to /tmp/retrain_logs (by default)
+    merged_summaries = tf.summary.merge_all()
+    train_writer = tf.summary.FileWriter(os.path.join(train_dir, 'summary', 'train'), sess.graph)
+    valid_writer = tf.summary.FileWriter(os.path.join(train_dir, 'summary', 'valid'))
     
     # Run an initializer op to initialize the variables
     init = tf.global_variables_initializer()
@@ -152,13 +167,14 @@ def train():
     
         x, y_seg, y_con = data_processor.batch(FLAGS.batch_size, offset=0, mode='train')
         
-        train_loss, _, _ = sess.run([total_loss, train_op, increment_global_step],
-                                    feed_dict={img_input: x,
-                                               labels_seg: y_seg,
-                                               labels_con: y_con, 
-                                               lr_input: learning_rate,
-                                               is_training: True})
+        train_loss, train_summary, _, _ = sess.run([total_loss, merged_summaries, train_op, increment_global_step],
+                                                   feed_dict={img_input: x,
+                                                              labels_seg: y_seg,
+                                                              labels_con: y_con, 
+                                                              lr_input: learning_rate,
+                                                              is_training: True})
         
+        train_writer.add_summary(train_summary, training_step)
         msg = f"Step {training_step}: learning rate {learning_rate}, accuracy TBD, loss {train_loss:.5f}"
         tf.logging.info(msg)
     
@@ -171,14 +187,15 @@ def train():
     
                 # TODO: When is_training is set to false, the val loss is very odd. Guess I must leave it at true since
                 # it's using the graph built with batch norm :shrug:
-                batch_valid_loss = sess.run(total_loss,
-                                            feed_dict={img_input: val_x,
-                                                       labels_seg: val_y_seg, 
-                                                       labels_con: val_y_con,
-                                                       is_training: True})
+                batch_valid_loss, valid_summary = sess.run([total_loss, merged_summaries],
+                                                           feed_dict={img_input: val_x,
+                                                                      labels_seg: val_y_seg, 
+                                                                      labels_con: val_y_con,
+                                                                      is_training: True})
     
                 valid_loss += (batch_valid_loss * val_x.shape[0]) / val_size
-    
+                valid_writer.add_summary(valid_summary, training_step)
+                
             tf.logging.info(f"Step {training_step}: validation loss = {valid_loss:.5f}, (N={val_size})")
     
             # Save the model checkpoint when validation loss improves
@@ -215,6 +232,10 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_string(
     'ds_model', 'resnet50_v1',
     'The down-sample model to use')
+
+tf.app.flags.DEFINE_boolean(
+    'notes', False,
+    'Add notes to to a file in training directory')
 
 # ----------------------
 # Checkpoint parameters
