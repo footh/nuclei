@@ -123,6 +123,11 @@ def temp_write(step, x, ys, yc):
         yci = Image.fromarray(yc[i])
         yci.save(f"./tmp/{step}-yc-{i}.gif")
 -------------------------
+    loss_seg = tf.nn.sigmoid_cross_entropy_with_logits(labels=labels_seg, logits=logits_seg, name='loss_seg')
+    loss_con = tf.nn.sigmoid_cross_entropy_with_logits(labels=labels_con, logits=logits_con, name='loss_con')
+    mean_loss_seg = tf.reduce_mean(loss_seg, name='mean_loss_seg')
+    mean_loss_con = tf.reduce_mean(loss_con, name='mean_loss_con')
+    total_loss = tf.add(mean_loss_seg, mean_loss_con, name='total_loss')
 -------------------------
 -------------------------
 -------------------------

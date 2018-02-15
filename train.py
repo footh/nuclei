@@ -10,13 +10,15 @@ IMG_SIZE = 256
 MODEL_SCOPE = "dcan"
 
 # TODO: parameterize these
-TRAINING_STEPS = [10000, 5000, 5000]
+TRAINING_STEPS = [15000, 15000, 15000]
 LEARNING_RATES = [0.001, 0.0007, 0.0003]
 ADAM_EPISILON = 0.1
 VALIDATION_PCT = 15
 VAL_INTERVAL = 300
 TRAIN_BASE_DIR = 'training-runs'
 L2_WEIGHT_DECAY = 0.0001
+SEG_RATIO = 0.13405
+CON_RATIO = 0.04466
 
 
 def loss(logits_seg, logits_con, labels_seg, labels_con):
@@ -29,14 +31,16 @@ def loss(logits_seg, logits_con, labels_seg, labels_con):
     # Means there will be 6 of them - 3 for each label type. FCN code doesn't reveal much about weighting and the paper doesn't 
     # help much either.
     
-    #loss_seg = tf.nn.sigmoid_cross_entropy_with_logits(labels=labels_seg, logits=logits_seg, name='loss_seg')
-    #loss_con = tf.nn.sigmoid_cross_entropy_with_logits(labels=labels_con, logits=logits_con, name='loss_con')
-    #mean_loss_seg = tf.reduce_mean(loss_seg, name='mean_loss_seg')
-    #mean_loss_con = tf.reduce_mean(loss_con, name='mean_loss_con')
-    #total_loss = tf.add(mean_loss_seg, mean_loss_con, name='total_loss')
+    with tf.variable_scope("weights/segment"):
+        weights_seg = tf.scalar_mul(SEG_RATIO, tf.cast(tf.equal(labels_seg, 0), tf.float32)) + \
+                      tf.scalar_mul(1 - SEG_RATIO, tf.cast(tf.equal(labels_seg, 1), tf.float32))
 
-    loss_seg = tf.losses.sigmoid_cross_entropy(labels_seg, logits_seg, scope='segment_loss')
-    loss_con = tf.losses.sigmoid_cross_entropy(labels_con, logits_con, scope='contour_loss')
+    with tf.variable_scope("weights/contour"):
+        weights_con = tf.scalar_mul(CON_RATIO, tf.cast(tf.equal(labels_con, 0), tf.float32)) + \
+                      tf.scalar_mul(1 - CON_RATIO, tf.cast(tf.equal(labels_con, 1), tf.float32))
+    
+    loss_seg = tf.losses.sigmoid_cross_entropy(labels_seg, logits_seg, weights=weights_seg, scope='segment_loss')
+    loss_con = tf.losses.sigmoid_cross_entropy(labels_con, logits_con, weights=weights_con, scope='contour_loss')
     
     total_loss = tf.add(loss_seg, loss_con, name='total_loss')
     

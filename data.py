@@ -212,8 +212,8 @@ def ratio(src='train'):
 
     assert(seg_total == con_total)
 
-    seg_ratio = seg_pixels / (seg_total * 2)
-    con_ratio = con_pixels / (con_total * 2)
+    seg_ratio = seg_pixels / seg_total
+    con_ratio = con_pixels / con_total
 
     return seg_ratio, con_ratio
 
