@@ -20,3 +20,17 @@ Similar to above run but extending the steps and increasing the learning rates t
 step 18300. The five best were at steps 12000 (at 0.17468), 12600, 13500, 15600 and 18300. So not sure if even more steps with higher rate lingering longer would work? 
 The training losses vary greatly (obviously with batch size 5), but the eyeball test seem to show a pretty close correlation to val loss. Could this mean less 
 overfitting? Unsure what to do with the epsilon experiment. 
+
+[15000, 15000, 15000], [0.001, 0.0007, 0.0003], Adam epsilon 0.1, consistent validation data, per-label weighting:
+tensorboard --logdir=/home/jfaath/dev/projects/nuclei/training-runs/bs5_resinit3/summary/train
+Loss scores are significantly lower relatively due to the label weighting so it's hard to make a comparison with previous runs. Looks like loss peaked
+at around 15K steps and remained steady after though the 'best' 5 checkpoints were all near the very end, including the last one (step 45K) as the best.
+The validation loss is very similar to the training loss which may be good.
+
+[15000, 15000, 15000], [0.001, 0.0007, 0.0003], Adam epsilon 0.1, consistent validation data, per-label weighting, THIN contours again:
+tensorboard --logdir=/home/jfaath/dev/projects/nuclei/training-runs/bs5_resinit4/summary/train
+Cut at around 17K iterations. The contour predictions were even worse in terms of thickness. So I conclude that thicker contours provide more ground truth
+for the algorithm to key off of. I *think* the segments weren't as good with the smaller training steps but not entirely sure.
+
+[10000, 5000, 5000], [0.001, 0.0007, 0.0003], Adam epsilon 1e-08, THICK contours:
+

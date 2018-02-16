@@ -14,8 +14,8 @@ def _debug_output(sample_info, result_seg, result_con):
     fname = f"{sample_info['id']}-{data.IMG_SRC}.{data.IMG_EXT}"
     shutil.copy2(os.path.join('test', fname), os.path.join('debug', fname))
     
-    result_seg = np.asarray(result_seg > 0.5, dtype=np.uint8) * 255
-    result_con = np.asarray(result_con > 0.2, dtype=np.uint8) * 255
+    result_seg = np.asarray(result_seg > 0.50, dtype=np.uint8) * 255
+    result_con = np.asarray(result_con > 0.50, dtype=np.uint8) * 255
     Image.fromarray(result_seg).save(os.path.join('debug', fname.replace(data.IMG_SRC, data.IMG_SEGMENT)))
     Image.fromarray(result_con).save(os.path.join('debug', fname.replace(data.IMG_SRC, data.IMG_CONTOUR)))
 

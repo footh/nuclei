@@ -10,15 +10,16 @@ IMG_SIZE = 256
 MODEL_SCOPE = "dcan"
 
 # TODO: parameterize these
-TRAINING_STEPS = [15000, 15000, 15000]
+TRAINING_STEPS = [10000, 5000, 5000]
 LEARNING_RATES = [0.001, 0.0007, 0.0003]
-ADAM_EPISILON = 0.1
+ADAM_EPSILON = 1e-08
 VALIDATION_PCT = 15
 VAL_INTERVAL = 300
 TRAIN_BASE_DIR = 'training-runs'
 L2_WEIGHT_DECAY = 0.0001
 SEG_RATIO = 0.13405
 CON_RATIO = 0.04466
+#CON_RATIO = 0.02078
 
 
 def loss(logits_seg, logits_con, labels_seg, labels_con):
@@ -45,6 +46,19 @@ def loss(logits_seg, logits_con, labels_seg, labels_con):
     total_loss = tf.add(loss_seg, loss_con, name='total_loss')
     
     return total_loss
+
+
+def iou(logits, labels, scope=None):
+    
+    with tf.variable_scope(f"iou/{scope}"):
+        preds = tf.nn.sigmoid(logits)
+        preds = tf.greater_equal(preds, 0.5)
+        labels_bool = tf.cast(labels, tf.bool)
+        
+        intersection = tf.reduce_sum(tf.cast(tf.logical_and(preds, labels_bool), tf.float32))
+        union = tf.reduce_sum(tf.cast(tf.logical_or(preds, labels_bool), tf.float32))
+    
+    return intersection / union
 
 
 def restore_from_checkpoint(model_path, sess, var_filter=None):
@@ -123,13 +137,17 @@ def train():
         total_loss = loss(logits_seg, logits_con, labels_seg, labels_con)
         tf.summary.scalar('total_loss', total_loss)
 
+        # IOU calcs to measure during training
+        iou_seg = iou(logits_seg, labels_seg, scope='segment')
+        tf.summary.scalar('segment_iou', iou_seg)
+        iou_con = iou(logits_con, labels_con, scope='contour')
+        tf.summary.scalar('contour_iou', iou_con)
+
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.name_scope('train'), tf.control_dependencies(update_ops):
 
         lr_input = tf.placeholder(tf.float32, [], name='learning_rate_input')
-        train_op = tf.train.AdamOptimizer(learning_rate=lr_input, epsilon=ADAM_EPISILON).minimize(total_loss)
-
-    # TODO: add accuracy calculation (IOU?, standard accuracy?) here. This will be added to the session run below
+        train_op = tf.train.AdamOptimizer(learning_rate=lr_input, epsilon=ADAM_EPSILON).minimize(total_loss)
 
     global_step = tf.train.get_or_create_global_step()
     increment_global_step = tf.assign(global_step, global_step + 1)
@@ -171,36 +189,46 @@ def train():
     
         x, y_seg, y_con = data_processor.batch(FLAGS.batch_size, offset=0, mode='train')
         
-        train_loss, train_summary, _, _ = sess.run([total_loss, merged_summaries, train_op, increment_global_step],
-                                                   feed_dict={img_input: x,
-                                                              labels_seg: y_seg,
-                                                              labels_con: y_con, 
-                                                              lr_input: learning_rate,
-                                                              is_training: True})
+        train_loss, train_iou_seg, train_iou_con, train_summary, _, _ = sess.run([total_loss, 
+                                                                                  iou_seg, 
+                                                                                  iou_con, 
+                                                                                  merged_summaries, 
+                                                                                  train_op, 
+                                                                                  increment_global_step], 
+                                                                                  feed_dict={img_input: x,
+                                                                                             labels_seg: y_seg,
+                                                                                             labels_con: y_con, 
+                                                                                             lr_input: learning_rate,
+                                                                                             is_training: True})
         
         train_writer.add_summary(train_summary, training_step)
-        msg = f"Step {training_step}: learning rate {learning_rate}, accuracy TBD, loss {train_loss:.5f}"
+        msg = f"Step {training_step}: learning rate {learning_rate}, IOU segment {train_iou_seg:.3f}, IOU contour {train_iou_con:.3f}, loss {train_loss:.5f}"
         tf.logging.info(msg)
     
         if (training_step % VAL_INTERVAL) == 0 or (training_step == max_training_steps):
             val_size = data_processor.mode_size(mode='valid')
             valid_loss = 0
+            valid_iou_seg = 0
+            valid_iou_con = 0
             
             for val_step in range(0, val_size, FLAGS.batch_size):
                 val_x, val_y_seg, val_y_con = data_processor.batch(FLAGS.batch_size, offset=val_step, mode='valid')
     
                 # TODO: When is_training is set to false, the val loss is very odd. Guess I must leave it at true since
                 # it's using the graph built with batch norm :shrug:
-                batch_valid_loss, valid_summary = sess.run([total_loss, merged_summaries],
-                                                           feed_dict={img_input: val_x,
-                                                                      labels_seg: val_y_seg, 
-                                                                      labels_con: val_y_con,
-                                                                      is_training: True})
+                batch_valid_loss, batch_valid_iou_seg, batch_valid_iou_con, valid_summary = sess.run([total_loss, iou_seg, iou_con, merged_summaries],
+                                                                                                     feed_dict={img_input: val_x,
+                                                                                                                labels_seg: val_y_seg, 
+                                                                                                                labels_con: val_y_con,
+                                                                                                                is_training: True})
     
                 valid_loss += (batch_valid_loss * val_x.shape[0]) / val_size
+                valid_iou_seg += (batch_valid_iou_seg * val_x.shape[0]) / val_size
+                valid_iou_con += (batch_valid_iou_con * val_x.shape[0]) / val_size
                 valid_writer.add_summary(valid_summary, training_step)
                 
-            tf.logging.info(f"Step {training_step}: validation loss = {valid_loss:.5f}, (N={val_size})")
+            msg = f"Step {training_step}: validation loss {valid_loss:.5f}, iou segment {valid_iou_seg:.3f}, iou contour {valid_iou_con:.3f} (N={val_size})"
+            tf.logging.info(msg)
     
             # Save the model checkpoint when validation loss improves
             if valid_loss < best_valid_loss:
