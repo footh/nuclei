@@ -8,6 +8,7 @@ from tensorflow.python.util import compat
 
 import sys
 import os
+import pandas as pd
 import shutil
 import numpy as np
 from PIL import Image
@@ -218,15 +219,15 @@ def ratio(src='train'):
     return seg_ratio, con_ratio
 
 
-def which_set(file_id, validation_pct, testing_pct):
+def which_set(file_id, validation_pct, testing_pct, radix=MAX_NUM_PER_CLASS):
     """
         Determines which data partition the file should belong to.
         (taken from tensorflow speech audio tutorial
     
-        Returns string, one of 'training', 'validation', or 'testing'.
+        Returns string, one of 'train', 'valid', or 'test'.
     """
     file_id_hashed = hashlib.sha1(compat.as_bytes(file_id)).hexdigest()
-    percentage_hash = ((int(file_id_hashed, 16) % (MAX_NUM_PER_CLASS + 1)) * (100.0 / MAX_NUM_PER_CLASS))
+    percentage_hash = ((int(file_id_hashed, 16) % (radix + 1)) * (100.0 / radix))
 
     if percentage_hash < validation_pct:
         result = 'valid'
@@ -312,19 +313,43 @@ class DataProcessor:
             Build the index of files, bucketed by source group
         """
         src_dir = self.src
-
-        # Getting the unique file ids in the src set
-        all_files = file_list(src_dir)
-        file_ids = list({os.path.basename(file).split('-')[0] for file in all_files})
-        tf.logging.info(f"Total unique files found: {len(file_ids)}")
         
-        for file_id in file_ids:
-            idx = which_set(file_id, self.validation_pct, self.testing_pct)
-            self.data_index[idx].append(file_id)
+        class_dict = self._classes()
+
+        for class_key, id_list in class_dict.items():
+            print(f"Allotting for class: {class_key}")
+            for id in id_list:
+                idx = which_set(id, self.validation_pct, self.testing_pct, radix=len(id_list))
+                self.data_index[idx].append(id)
             
         tf.logging.info(f"Training total: {len(self.data_index['train'])}")
         tf.logging.info(f"Validation total: {len(self.data_index['valid'])}")
         tf.logging.info(f"Testing total: {len(self.data_index['test'])}")
+
+    def _classes(self, file='classes.csv'):
+        """
+            Returns a dict of class type to file id for the given src
+        """
+        df = pd.read_csv(os.path.join('raw-data', file))
+    
+        # Restrict to files in the processed directory
+        all_files = file_list(self.src)
+        flist = list({f"{os.path.basename(file).split('-')[0]}.{IMG_EXT}" for file in all_files})        
+        df = df.query('filename in @flist')
+    
+        result = dict(df.groupby(df.foreground + '-' + df.background)['filename'].apply(list))
+    
+        ttl = 0
+        for key, value in result.items():
+            id_list = [os.path.splitext(v)[0] for v in value]
+            result[key] = id_list
+
+            print(f"{key}: {len(id_list)}")
+            ttl += len(id_list)
+
+        print(f"Total unique files found: {ttl}")
+
+        return result
         
     def mode_size(self, mode='train'):
         return len(self.data_index[mode])        
