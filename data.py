@@ -394,8 +394,8 @@ class DataProcessor:
         sample = np.pad(sample, ((top_adj, bot_adj), (left_adj, right_adj), (0, 0)), mode=PAD_MODE)
 
         pad_info = {'rows': rows,
-                       'cols': cols,
-                       'tb_adj': (top_adj, bot_adj), 'lr_adj': (left_adj, right_adj)}
+                    'cols': cols,
+                    'tb_adj': (top_adj, bot_adj), 'lr_adj': (left_adj, right_adj)}
         tf.logging.debug(f"pad_info: {pad_info}")
         
         return sample, pad_info
@@ -439,7 +439,10 @@ class DataProcessor:
         # TODO: distortion
         return sample, sample_seg, sample_con
 
-    def _labels(self, sample_id, pad_info, top=0, left=0):
+    def _labels(self, sample_id, pad_info):
+        """
+            Get the ground truth from the id and pad as necessary
+        """
         sample_seg = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SEGMENT}.{IMG_EXT}")))
         sample_con = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_CONTOUR}.{IMG_EXT}")))
 
@@ -449,10 +452,10 @@ class DataProcessor:
             Image.fromarray(sample_seg).save(f"/tmp/nuclei/{sample_id}-{IMG_SEGMENT}-pad.{IMG_EXT}")
             Image.fromarray(sample_con).save(f"/tmp/nuclei/{sample_id}-{IMG_CONTOUR}-pad.{IMG_EXT}")
 
-        sample_seg = sample_seg[top:top + self.img_size, left:left + self.img_size]
-        sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
-
         return sample_seg, sample_con
+
+    def _valid_crop(self, sample_con):
+        return True
 
     def batch(self, size, offset=0, mode='train'):
         """
@@ -470,7 +473,6 @@ class DataProcessor:
 
         # Initializing return values
         inputs = np.zeros((sample_count, self.img_size, self.img_size, IMG_CHANNELS), dtype=np.float32)
-        inputs_info = []
         labels_seg = np.zeros((sample_count, self.img_size, self.img_size), dtype=np.float32)
         labels_con = np.zeros((sample_count, self.img_size, self.img_size), dtype=np.float32)
 
@@ -487,20 +489,31 @@ class DataProcessor:
             tf.logging.debug(f"pre-pad sample_src.shape: {sample_src.shape}")
             sample_src, pad_info = self._pad_to_size(sample_src)
             tf.logging.debug(f"post-pad sample_src.shape: {sample_src.shape}")
-            inputs_info.append(pad_info)
             if _DEBUG_:
                 Image.fromarray(sample_src).save(f"/tmp/nuclei/{sample_id}-{IMG_SRC}-pad.{IMG_EXT}")
-            
-            # Picking a random sample of the image (if it is larger than the provided img_size).
-            # Validation data will use deterministic seeds if configured.
-            seed = None
-            if not is_training and self.valid_seeds is not None:
-                seed = self.valid_seeds[sample_index]
-            top, left = self._sampling_points(sample_src, seed=seed)
-            sample_src = sample_src[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
 
             # Get the ground truth
-            sample_seg, sample_con = self._labels(sample_id, pad_info, top, left)
+            sample_seg, sample_con = self._labels(sample_id, pad_info)
+
+            # Picking a random sample of the image (if it is larger than the provided img_size).
+            # Validation data will use deterministic seeds if configured.
+            if not is_training and self.valid_seeds is not None:
+                seed = self.valid_seeds[sample_index]
+                top, left = self._sampling_points(sample_src, seed=seed)
+            else:
+                # TODO: Only fire this when necessary, ie. when the batch hasn't met the percentage requirement.
+                # In fact, wrap this entire block in a function that only runs if batch hasn't met requirement.
+                MAX_TRIES = 10
+                tries = 0
+                while True:
+                    tries += 1
+                    top, left = self._sampling_points(sample_src)
+                    if self._valid_crop(sample_con, top, left) or tries < MAX_TRIES:
+                        break
+
+            sample_src = sample_src[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
+            sample_seg = sample_seg[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
+            sample_con = sample_con[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
 
             # Augment the data if training
             if is_training:
