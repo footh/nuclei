@@ -31,6 +31,17 @@ IMG_SRC = 'src'
 IMG_CONTOUR = 'con'
 IMG_SEGMENT = 'seg'
 
+CONTOUR_DILATION = {
+        20: 2,
+        30: 3,
+        40: 4,
+        60: 5,
+        80: 6,
+        100: 7,
+        150: 8,
+        1000: 9
+    }
+
 _DEBUG_ = False
 
 
@@ -113,18 +124,26 @@ def kmeans(img_size=(256, 256), clusters=3):
     return x, km
 
 
-def _draw_contours(src, dest, dilation_val=2):
+def _draw_contours(src, dest):
     """
         Finds contours on src array and writes them to dest array
     """
     contours = measure.find_contours(src, 0.5)  # TODO: investigate this parameter
+    assert(len(contours) == 1)
+    perim = measure.perimeter(src == 255)
+    assert(perim > 0)
 
     result = np.zeros(src.shape, dtype=np.uint8)
     for contour in contours:
         contour = contour.astype(int)
         result[contour[:, 0], contour[:, 1]] = 255
 
-    # se = morphology.disk(1)
+    dilation_val = 1
+    for perim_size, selem_size in CONTOUR_DILATION.items():
+        if perim < perim_size:
+            dilation_val = selem_size
+            break
+    
     se = morphology.square(dilation_val)
     result = morphology.dilation(result, se)
 
