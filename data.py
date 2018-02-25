@@ -42,12 +42,22 @@ CONTOUR_DILATION = {
         1000: 9
     }
 
+CONTOUR_FREQ_RATIO = 0.1 # Ratio of positive contour labels that must be in a sample to be considered a hit
+CONTOUR_FREQ = 0.5 # Percentage of a batch that must contain contour label hits
+CONTOUR_CROP_MAX = 10 # Amount of times to try a different crop before calling it quits
+CONTOUR_CONTINUE_MAX = 100 # Amount of times to try a different sample before just moving on with the batch
+
 _DEBUG_ = False
+_DEBUG_WRITE_ = False
 
 
-def SET_DEBUG(val=False):
-    tf.gfile.MakeDirs('/tmp/nuclei')
+def SET_DEBUG(val=False, write=False):
+    if write:
+        tf.gfile.MakeDirs('/tmp/nuclei')
+
     sys.modules[__name__]._DEBUG_ = val
+    sys.modules[__name__]._DEBUG_WRITE_ = write
+
     tf_setting = tf.logging.DEBUG if val else tf.logging.INFO
     tf.logging.set_verbosity(tf_setting)
 
@@ -129,7 +139,7 @@ def _draw_contours(src, dest):
         Finds contours on src array and writes them to dest array
     """
     contours = measure.find_contours(src, 0.5)  # TODO: investigate this parameter
-    assert(len(contours) == 1)
+    #assert(len(contours) == 1)
     perim = measure.perimeter(src == 255)
     assert(perim > 0)
 
@@ -448,14 +458,29 @@ class DataProcessor:
 
         sample_seg = np.pad(sample_seg, (pad_info['tb_adj'], pad_info['lr_adj']), mode=PAD_MODE)
         sample_con = np.pad(sample_con, (pad_info['tb_adj'], pad_info['lr_adj']), mode=PAD_MODE)
-        if _DEBUG_:
-            Image.fromarray(sample_seg).save(f"/tmp/nuclei/{sample_id}-{IMG_SEGMENT}-pad.{IMG_EXT}")
-            Image.fromarray(sample_con).save(f"/tmp/nuclei/{sample_id}-{IMG_CONTOUR}-pad.{IMG_EXT}")
 
         return sample_seg, sample_con
 
     def _valid_crop(self, sample_con):
-        return True
+        """
+            Return if a valid crop was attained and the top, left coordinates. Valid crops must meet or exceed the configured contour ratio.
+            If all tries are attempted without a hit, the last top, left attempt is returned.
+        """
+        hit = False
+        for i in range(CONTOUR_CROP_MAX):
+            top, left = self._sampling_points(sample_con)
+            cropped_sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
+            ratio = np.sum(cropped_sample_con > 0) / np.prod(cropped_sample_con.shape)
+            tf.logging.debug(f"Contour ratio: {ratio}")
+
+            if ratio >= CONTOUR_FREQ_RATIO:
+                tf.logging.debug(f"Contour ratio hit: {top}, {left}")
+                hit = True
+                break
+            else:
+                tf.logging.debug(f"Contour ratio miss: {top}, {left}")
+        
+        return hit, top, left
 
     def batch(self, size, offset=0, mode='train'):
         """
@@ -470,15 +495,24 @@ class DataProcessor:
             sample_count = len(source_ids)
         else:
             sample_count = max(0, min(size, len(source_ids) - offset))
+            
+        # Amount of contour misses allowed in this batch (size - required contour hits)
+        contour_misses_allowed = size - math.ceil(CONTOUR_FREQ * size)
 
         # Initializing return values
         inputs = np.zeros((sample_count, self.img_size, self.img_size, IMG_CHANNELS), dtype=np.float32)
         labels_seg = np.zeros((sample_count, self.img_size, self.img_size), dtype=np.float32)
         labels_con = np.zeros((sample_count, self.img_size, self.img_size), dtype=np.float32)
 
-        for i in range(offset, offset + sample_count):
+        cur_idx = 0
+        contour_misses = 0
+        continues = 0
+        while True:
+            if cur_idx >= sample_count:
+                break
+            
             if size == -1 or not is_training:
-                sample_index = i
+                sample_index = cur_idx + offset
             else:
                 sample_index = np.random.randint(len(source_ids))
 
@@ -489,11 +523,14 @@ class DataProcessor:
             tf.logging.debug(f"pre-pad sample_src.shape: {sample_src.shape}")
             sample_src, pad_info = self._pad_to_size(sample_src)
             tf.logging.debug(f"post-pad sample_src.shape: {sample_src.shape}")
-            if _DEBUG_:
+            if _DEBUG_WRITE_:
                 Image.fromarray(sample_src).save(f"/tmp/nuclei/{sample_id}-{IMG_SRC}-pad.{IMG_EXT}")
 
             # Get the ground truth
             sample_seg, sample_con = self._labels(sample_id, pad_info)
+            if _DEBUG_WRITE_:
+                Image.fromarray(sample_seg).save(f"/tmp/nuclei/{sample_id}-{IMG_SEGMENT}-pad.{IMG_EXT}")
+                Image.fromarray(sample_con).save(f"/tmp/nuclei/{sample_id}-{IMG_CONTOUR}-pad.{IMG_EXT}")
 
             # Picking a random sample of the image (if it is larger than the provided img_size).
             # Validation data will use deterministic seeds if configured.
@@ -501,25 +538,28 @@ class DataProcessor:
                 seed = self.valid_seeds[sample_index]
                 top, left = self._sampling_points(sample_src, seed=seed)
             else:
-                # TODO: Only fire this when necessary, ie. when the batch hasn't met the percentage requirement.
-                # In fact, wrap this entire block in a function that only runs if batch hasn't met requirement.
-                MAX_TRIES = 10
-                tries = 0
-                while True:
-                    tries += 1
+                # Attempt to fulfill the contour ratio requirement up to a point
+                if continues > CONTOUR_CONTINUE_MAX:
                     top, left = self._sampling_points(sample_src)
-                    if self._valid_crop(sample_con, top, left) or tries < MAX_TRIES:
-                        break
+                else:
+                    hit, top, left = self._valid_crop(sample_con)
+                    if not hit:
+                        contour_misses += 1
+                        tf.logging.debug(f"Failed contour ratio on sample: {sample_id}, miss count: {contour_misses}")
+                        if contour_misses > contour_misses_allowed:
+                            continues += 1
+                            tf.logging.debug(f"No more misses left. Trying another sample. Continues left: {CONTOUR_CONTINUE_MAX - continues}")
+                            continue
 
             sample_src = sample_src[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
-            sample_seg = sample_seg[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
-            sample_con = sample_con[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
+            sample_seg = sample_seg[top:top + self.img_size, left:left + self.img_size]
+            sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
 
             # Augment the data if training
             if is_training:
                 sample_src, sample_seg, sample_con = self._augment(sample_src, sample_seg, sample_con)
  
-                if _DEBUG_:
+                if _DEBUG_WRITE_:
                     Image.fromarray(sample_src).save(f"/tmp/nuclei/{sample_id}-{IMG_SRC}-aug.{IMG_EXT}")
                     Image.fromarray(sample_seg).save(f"/tmp/nuclei/{sample_id}-{IMG_SEGMENT}-aug.{IMG_EXT}")
                     Image.fromarray(sample_con).save(f"/tmp/nuclei/{sample_id}-{IMG_CONTOUR}-aug.{IMG_EXT}")
@@ -530,9 +570,12 @@ class DataProcessor:
             sample_seg = sample_seg / 255.
             sample_con = sample_con / 255.
 
-            inputs[i - offset] = sample_src
-            labels_seg[i - offset] = sample_seg
-            labels_con[i - offset] = sample_con
+            inputs[cur_idx] = sample_src
+            labels_seg[cur_idx] = sample_seg
+            labels_con[cur_idx] = sample_con
+            tf.logging.debug(f"Sample added at index {cur_idx}")
+            
+            cur_idx += 1
 
         return inputs, labels_seg, labels_con
 
@@ -554,7 +597,7 @@ class DataProcessor:
         sample_info['id'] = sample_id
 
         sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
-        if _DEBUG_:
+        if _DEBUG_WRITE_:
             img = Image.fromarray(sample_src)
             img.save(f"/tmp/nuclei/original.png")
         tf.logging.debug(f"sample original shape: {sample_src.shape}")
@@ -590,7 +633,7 @@ class DataProcessor:
         tiles = np.asarray(tiles)
         tf.logging.debug(f"tiles.shape: {tiles.shape}")
 
-        if _DEBUG_:
+        if _DEBUG_WRITE_:
             img = Image.fromarray(np.asarray(sample_src, dtype=np.uint8))
             img.save(f"/tmp/nuclei/master.png")
             #tiles_debug = tiles.reshape(tiles.shape[0] * tiles.shape[1], *tiles.shape[2:])
