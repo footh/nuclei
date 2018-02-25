@@ -140,6 +140,18 @@ def temp_write(step, x, ys, yc):
         new_class_df.loc[i] = new_row
     
     new_class_df.to_csv('./raw-data/classes2.csv')
+
+loc = '/home/jfaath/Downloads/files'
+class_df = pd.read_csv(os.path.join('..', 'classes.csv'))
+new_class_df = pd.DataFrame(columns=['filename', 'foreground', 'background', 'rows', 'cols', 'set'])
+
+for i, row in enumerate(class_df.itertuples()):
+    name, ext = os.path.splitext(os.path.basename(row.filename))
+    imga = np.asarray(Image.open(os.path.join(loc, name, 'images', row.filename)))
+    new_row = [row.filename, row.foreground, row.background, imga.shape[0], imga.shape[1], row.set]
+    new_class_df.loc[i] = new_row
+
+new_class_df.to_csv('classes2.csv')
 -------------------------
 -------------------------
 -------------------------
