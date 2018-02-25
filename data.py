@@ -359,7 +359,7 @@ class DataProcessor:
         """
             Returns a dict of class type to file id for the given src
         """
-        df = pd.read_csv(os.path.join('raw-data', file))
+        df = pd.read_csv(file)
     
         # Restrict to files in the processed directory
         all_files = file_list(self.src)
