@@ -33,18 +33,17 @@ IMG_SEGMENT = 'seg'
 
 CONTOUR_DILATION = {
         20: 2,
-        30: 3,
-        40: 4,
-        60: 5,
-        80: 6,
-        100: 7,
-        150: 8,
-        1000: 9
+        30: 2,
+        40: 3,
+        60: 4,
+        80: 5,
+        100: 6,
+        150: 7,
+        1000: 8
     }
 
-CONTOUR_FREQ_RATIO = 0.1 # Ratio of positive contour labels that must be in a sample to be considered a hit
+CONTOUR_FREQ_RATIO = 0.015 # Ratio of positive contour labels that must be in a sample to be considered a hit
 CONTOUR_FREQ = 0.5 # Percentage of a batch that must contain contour label hits
-CONTOUR_CROP_MAX = 10 # Amount of times to try a different crop before calling it quits
 CONTOUR_CONTINUE_MAX = 100 # Amount of times to try a different sample before just moving on with the batch
 
 _DEBUG_ = False
@@ -196,8 +195,9 @@ def setup(src='train', with_masks=True, early_stop=None):
         Move raw files with full ground truth segment and contour masks over to the src directory. File names
         are id-{type}.png where type is 'src' for source image, 'seg' for segment mask and 'con' for contour mask
     """
-    print(f"Clearing {src} directory...")
-    _remove_files(src)
+    src_dir = os.path.join('model-data', src)
+    print(f"Clearing {src_dir} directory...")
+    _remove_files(src_dir)
 
     flist = raw_file_list(src=src)
     for cnt, f in enumerate(flist):
@@ -210,10 +210,10 @@ def setup(src='train', with_masks=True, early_stop=None):
         name, ext = os.path.basename(f).split('.')
         print(f"Processing {name}...")
         
-        shutil.copy2(f, os.path.join(src, f"{name}-{IMG_SRC}.{ext}"))
+        shutil.copy2(f, os.path.join(src_dir, f"{name}-{IMG_SRC}.{ext}"))
         if with_masks:
-            mask.save(os.path.join(src, f"{name}-{IMG_SEGMENT}.{ext}"))
-            contour.save(os.path.join(src, f"{name}-{IMG_CONTOUR}.{ext}"))
+            mask.save(os.path.join(src_dir, f"{name}-{IMG_SEGMENT}.{ext}"))
+            contour.save(os.path.join(src_dir, f"{name}-{IMG_CONTOUR}.{ext}"))
 
 
 def ratio(src='train'):
@@ -223,7 +223,8 @@ def ratio(src='train'):
     seg_pixels = 0
     seg_total = 0
 
-    seg_files = file_list(src, fname_wildcard=f"*-{IMG_SEGMENT}")
+    src_dir = os.path.join('model-data', src)
+    seg_files = file_list(src_dir, fname_wildcard=f"*-{IMG_SEGMENT}")
     tf.logging.info(f"Segment files found: {len(seg_files)}")
     for seg_file in seg_files:
         seg = np.asarray(Image.open(seg_file))
@@ -233,7 +234,7 @@ def ratio(src='train'):
     con_pixels = 0
     con_total = 0
 
-    con_files = file_list(src, fname_wildcard=f"*-{IMG_CONTOUR}")
+    con_files = file_list(src_dir, fname_wildcard=f"*-{IMG_CONTOUR}")
     tf.logging.info(f"Contour files found: {len(con_files)}")
     for con_file in con_files:
         con = np.asarray(Image.open(con_file))
@@ -325,7 +326,7 @@ class DataProcessor:
             
             'valid_same' parameter will assure the sampling points on 'valid' mode will be the same across calls
         """
-        self.src = src
+        self.src_dir = os.path.join('model-data', src)
         self.img_size = img_size
         self.validation_pct = validation_pct
         self.testing_pct = testing_pct
@@ -341,8 +342,6 @@ class DataProcessor:
         """
             Build the index of files, bucketed by source group
         """
-        src_dir = self.src
-        
         class_dict = self._classes()
 
         for class_key, id_list in class_dict.items():
@@ -362,7 +361,7 @@ class DataProcessor:
         df = pd.read_csv(file)
     
         # Restrict to files in the processed directory
-        all_files = file_list(self.src)
+        all_files = file_list(self.src_dir)
         flist = list({f"{os.path.basename(file).split('-')[0]}.{IMG_EXT}" for file in all_files})        
         df = df.query('filename in @flist')
     
@@ -453,8 +452,8 @@ class DataProcessor:
         """
             Get the ground truth from the id and pad as necessary
         """
-        sample_seg = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SEGMENT}.{IMG_EXT}")))
-        sample_con = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_CONTOUR}.{IMG_EXT}")))
+        sample_seg = np.asarray(Image.open(os.path.join(self.src_dir, f"{sample_id}-{IMG_SEGMENT}.{IMG_EXT}")))
+        sample_con = np.asarray(Image.open(os.path.join(self.src_dir, f"{sample_id}-{IMG_CONTOUR}.{IMG_EXT}")))
 
         sample_seg = np.pad(sample_seg, (pad_info['tb_adj'], pad_info['lr_adj']), mode=PAD_MODE)
         sample_con = np.pad(sample_con, (pad_info['tb_adj'], pad_info['lr_adj']), mode=PAD_MODE)
@@ -466,8 +465,15 @@ class DataProcessor:
             Return if a valid crop was attained and the top, left coordinates. Valid crops must meet or exceed the configured contour ratio.
             If all tries are attempted without a hit, the last top, left attempt is returned.
         """
+        # Will attempt crops based on the size of the image (larger image will have more attempts)
+        CROP_ATTEMPTS_PER = 10
+        crop_factor = (math.ceil(sample_con.shape[0] / self.img_size) - 1) + (math.ceil(sample_con.shape[1] / self.img_size) - 1)
+        crop_attempts_max = CROP_ATTEMPTS_PER * crop_factor
+        if crop_attempts_max == 0: crop_attempts_max = 1
+        tf.logging.debug(f"Maximum crop attempts: {crop_attempts_max}")
+
         hit = False
-        for i in range(CONTOUR_CROP_MAX):
+        for i in range(crop_attempts_max):
             top, left = self._sampling_points(sample_con)
             cropped_sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
             ratio = np.sum(cropped_sample_con > 0) / np.prod(cropped_sample_con.shape)
@@ -519,7 +525,7 @@ class DataProcessor:
             sample_id = source_ids[sample_index]
             tf.logging.debug(f"Using sample: {sample_id}")
 
-            sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
+            sample_src = np.asarray(Image.open(os.path.join(self.src_dir, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
             tf.logging.debug(f"pre-pad sample_src.shape: {sample_src.shape}")
             sample_src, pad_info = self._pad_to_size(sample_src)
             tf.logging.debug(f"post-pad sample_src.shape: {sample_src.shape}")
@@ -596,7 +602,7 @@ class DataProcessor:
         sample_id = self.data_index['test'][offset]
         sample_info['id'] = sample_id
 
-        sample_src = np.asarray(Image.open(os.path.join(self.src, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
+        sample_src = np.asarray(Image.open(os.path.join(self.src_dir, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
         if _DEBUG_WRITE_:
             img = Image.fromarray(sample_src)
             img.save(f"/tmp/nuclei/original.png")

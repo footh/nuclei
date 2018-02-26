@@ -6,6 +6,7 @@ original
 .idea
 training-runs
 raw-data
+model-data
 debug
 
 # Byte-compiled / optimized / DLL files

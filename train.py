@@ -17,9 +17,8 @@ VALIDATION_PCT = 15
 VAL_INTERVAL = 300
 TRAIN_BASE_DIR = 'training-runs'
 L2_WEIGHT_DECAY = 0.0001
-SEG_RATIO = 0.13405
-CON_RATIO = 0.04466
-#CON_RATIO = 0.02078
+#SEG_RATIO = 0.13405
+#CON_RATIO = 0.04466
 
 
 def loss(logits_seg, logits_con, labels_seg, labels_con):
@@ -32,16 +31,20 @@ def loss(logits_seg, logits_con, labels_seg, labels_con):
     # Means there will be 6 of them - 3 for each label type. FCN code doesn't reveal much about weighting and the paper doesn't 
     # help much either.
     
-    with tf.variable_scope("weights/segment"):
-        weights_seg = tf.scalar_mul(SEG_RATIO, tf.cast(tf.equal(labels_seg, 0), tf.float32)) + \
-                      tf.scalar_mul(1 - SEG_RATIO, tf.cast(tf.equal(labels_seg, 1), tf.float32))
+#     with tf.variable_scope("weights/segment"):
+#         weights_seg = tf.scalar_mul(SEG_RATIO, tf.cast(tf.equal(labels_seg, 0), tf.float32)) + \
+#                       tf.scalar_mul(1 - SEG_RATIO, tf.cast(tf.equal(labels_seg, 1), tf.float32))
+# 
+#     with tf.variable_scope("weights/contour"):
+#         weights_con = tf.scalar_mul(CON_RATIO, tf.cast(tf.equal(labels_con, 0), tf.float32)) + \
+#                       tf.scalar_mul(1 - CON_RATIO, tf.cast(tf.equal(labels_con, 1), tf.float32))
+#     
+#     loss_seg = tf.losses.sigmoid_cross_entropy(labels_seg, logits_seg, weights=weights_seg, scope='segment_loss')
+#     loss_con = tf.losses.sigmoid_cross_entropy(labels_con, logits_con, weights=weights_con, scope='contour_loss')
 
-    with tf.variable_scope("weights/contour"):
-        weights_con = tf.scalar_mul(CON_RATIO, tf.cast(tf.equal(labels_con, 0), tf.float32)) + \
-                      tf.scalar_mul(1 - CON_RATIO, tf.cast(tf.equal(labels_con, 1), tf.float32))
-    
-    loss_seg = tf.losses.sigmoid_cross_entropy(labels_seg, logits_seg, weights=weights_seg, scope='segment_loss')
-    loss_con = tf.losses.sigmoid_cross_entropy(labels_con, logits_con, weights=weights_con, scope='contour_loss')
+    loss_seg = tf.losses.sigmoid_cross_entropy(labels_seg, logits_seg, scope='segment_loss')
+    loss_con = tf.losses.sigmoid_cross_entropy(labels_con, logits_con, scope='contour_loss')
+
     
     total_loss = tf.add(loss_seg, loss_con, name='total_loss')
     
