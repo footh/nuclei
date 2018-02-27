@@ -11,13 +11,15 @@ MODEL_SCOPE = "dcan"
 
 # TODO: parameterize these
 TRAINING_STEPS = [8000, 8000, 8000, 8000]
-
+# For discrete learning rates
 LEARNING_RATES = [0.005, 0.001, 0.0007, 0.0003]
-ADAM_EPSILON = 1e-08
-
+# For exponential decay learning rate based on valid loss progress
 VALID_LOSS_STREAK_MAX = 10
 EXPONENTIAL_DECAY_BASE = 0.5
 LEARNING_RATE_BASE = 0.001
+# For Adam optimizer
+ADAM_EPSILON = 1e-08
+# For Momentum optimizer
 MOMENTUM = 0.2
 
 VALIDATION_PCT = 15
