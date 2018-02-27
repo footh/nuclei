@@ -11,8 +11,15 @@ MODEL_SCOPE = "dcan"
 
 # TODO: parameterize these
 TRAINING_STEPS = [8000, 8000, 8000, 8000]
+
 LEARNING_RATES = [0.005, 0.001, 0.0007, 0.0003]
 ADAM_EPSILON = 1e-08
+
+VALID_LOSS_STREAK_MAX = 10
+EXPONENTIAL_DECAY_BASE = 0.5
+LEARNING_RATE_BASE = 0.001
+MOMENTUM = 0.2
+
 VALIDATION_PCT = 15
 VAL_INTERVAL = 300
 TRAIN_BASE_DIR = 'training-runs'
@@ -45,7 +52,6 @@ def loss(logits_seg, logits_con, labels_seg, labels_con):
     loss_seg = tf.losses.sigmoid_cross_entropy(labels_seg, logits_seg, scope='segment_loss')
     loss_con = tf.losses.sigmoid_cross_entropy(labels_con, logits_con, scope='contour_loss')
 
-    
     total_loss = tf.add(loss_seg, loss_con, name='total_loss')
     
     return total_loss
@@ -86,6 +92,13 @@ def _get_learning_rate(training_step):
             return LEARNING_RATES[i]
 
 
+def _get_learning_rate_decay(valid_loss_streak_hits):
+    """
+        Return the learning rate based on the decay params
+    """
+    return LEARNING_RATE_BASE * (EXPONENTIAL_DECAY_BASE ** valid_loss_streak_hits)
+
+
 def _get_train_dir():
     """
         Returns the train directory, makes the directory if it doesn't exist
@@ -93,6 +106,7 @@ def _get_train_dir():
     cur_train_dir = os.path.join(TRAIN_BASE_DIR, FLAGS.run_desc)
     tf.gfile.MakeDirs(cur_train_dir)
     return cur_train_dir
+
 
 def _write_notes(train_dir):
     response = input("Training notes? (ENTER skips) ")
@@ -150,7 +164,8 @@ def train():
     with tf.name_scope('train'), tf.control_dependencies(update_ops):
 
         lr_input = tf.placeholder(tf.float32, [], name='learning_rate_input')
-        train_op = tf.train.AdamOptimizer(learning_rate=lr_input, epsilon=ADAM_EPSILON).minimize(total_loss)
+        # train_op = tf.train.AdamOptimizer(learning_rate=lr_input, epsilon=ADAM_EPSILON).minimize(total_loss)
+        train_op = tf.train.MomentumOptimizer(learning_rate=lr_input, momentum=MOMENTUM).minimize(total_loss)
 
     global_step = tf.train.get_or_create_global_step()
     increment_global_step = tf.assign(global_step, global_step + 1)
@@ -185,11 +200,14 @@ def train():
     
     # Training loop -------------------------
     best_valid_loss = 1000.
+    valid_loss_streak = 0
+    valid_loss_streak_hits = 0
     max_training_steps = np.sum(TRAINING_STEPS)
     for training_step in range(start_step, max_training_steps + 1):
         
-        learning_rate = _get_learning_rate(training_step)
-    
+        # learning_rate = _get_learning_rate(training_step)
+        learning_rate = _get_learning_rate_decay(valid_loss_streak_hits)
+
         x, y_seg, y_con = data_processor.batch(FLAGS.batch_size, offset=0, mode='train')
         
         train_loss, train_iou_seg, train_iou_con, train_summary, _, _ = sess.run([total_loss, 
@@ -205,7 +223,7 @@ def train():
                                                                                              is_training: True})
         
         train_writer.add_summary(train_summary, training_step)
-        msg = f"Step {training_step}: learning rate {learning_rate}, IOU segment {train_iou_seg:.3f}, IOU contour {train_iou_con:.3f}, loss {train_loss:.5f}"
+        msg = f"Step {training_step}: learning rate {learning_rate:.5f}, IOU segment {train_iou_seg:.3f}, IOU contour {train_iou_con:.3f}, loss {train_loss:.5f}"
         tf.logging.info(msg)
     
         if (training_step % VAL_INTERVAL) == 0 or (training_step == max_training_steps):
@@ -236,9 +254,17 @@ def train():
             # Save the model checkpoint when validation loss improves
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
+                valid_loss_streak = 0
                 checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}.ckpt")
                 tf.logging.info(f"Saving best model to {checkpoint_path}-{training_step}")
                 saver.save(sess, checkpoint_path, global_step=training_step)
+            else:
+                valid_loss_streak += 1
+                if valid_loss_streak >= VALID_LOSS_STREAK_MAX:
+                    valid_loss_streak = 0
+                    valid_loss_streak_hits += 1
+                    tf.logging.info(f"Valdation loss has not increased for {VALID_LOSS_STREAK_MAX} steps")
+                    tf.logging.info(f"Decay exponent increased to {valid_loss_streak_hits}")
 
             tf.logging.info(f"Best validation loss so far: {best_valid_loss:.5f}")
 
@@ -251,7 +277,7 @@ def main(_):
     
     train()
 
-            
+
 tf.app.flags.DEFINE_boolean(
     'debug_graph', False,
     'Wrap the training in a debug session')
@@ -282,7 +308,6 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_string(
     'checkpoint_filter', None,
     'The checkpoint filter to target initializing variables. Leaving at None initializes all')
-
 
 FLAGS = tf.app.flags.FLAGS
 
