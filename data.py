@@ -32,17 +32,16 @@ IMG_CONTOUR = 'con'
 IMG_SEGMENT = 'seg'
 
 CONTOUR_DILATION = {
-        20: 2,
-        30: 2,
-        40: 3,
-        60: 4,
-        80: 5,
-        100: 6,
-        150: 7,
-        1000: 8
+        5: 2,
+        10: 2,
+        17: 3,
+        22: 4,
+        30: 5,
+        42: 6,
+        1000: 7
     }
 
-CONTOUR_FREQ_RATIO = 0.015 # Ratio of positive contour labels that must be in a sample to be considered a hit
+CONTOUR_FREQ_RATIO = 0.008 # Ratio of positive contour labels that must be in a sample to be considered a hit
 CONTOUR_FREQ = 0.5 # Percentage of a batch that must contain contour label hits
 CONTOUR_CONTINUE_MAX = 100 # Amount of times to try a different sample before just moving on with the batch
 
@@ -139,8 +138,9 @@ def _draw_contours(src, dest):
     """
     contours = measure.find_contours(src, 0.5)  # TODO: investigate this parameter
     #assert(len(contours) == 1)
-    perim = measure.perimeter(src == 255)
-    assert(perim > 0)
+    rprops = measure.regionprops(src // 255)
+    minor_axis = rprops[0].minor_axis_length
+    assert(minor_axis > 0)
 
     result = np.zeros(src.shape, dtype=np.uint8)
     for contour in contours:
@@ -148,8 +148,8 @@ def _draw_contours(src, dest):
         result[contour[:, 0], contour[:, 1]] = 255
 
     dilation_val = 1
-    for perim_size, selem_size in CONTOUR_DILATION.items():
-        if perim < perim_size:
+    for maxis_size, selem_size in CONTOUR_DILATION.items():
+        if minor_axis < maxis_size:
             dilation_val = selem_size
             break
     
@@ -201,14 +201,14 @@ def setup(src='train', with_masks=True, early_stop=None):
 
     flist = raw_file_list(src=src)
     for cnt, f in enumerate(flist):
+        name, ext = os.path.basename(f).split('.')
+        print(f"{cnt}: Processing {name}...")
+
         if early_stop is not None and cnt > early_stop:
             break
 
         if with_masks:
             mask, contour = full_mask(f)
-        
-        name, ext = os.path.basename(f).split('.')
-        print(f"Processing {name}...")
         
         shutil.copy2(f, os.path.join(src_dir, f"{name}-{IMG_SRC}.{ext}"))
         if with_masks:
