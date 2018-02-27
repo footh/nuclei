@@ -34,3 +34,12 @@ for the algorithm to key off of. I *think* the segments weren't as good with the
 
 [10000, 5000, 5000], [0.001, 0.0007, 0.0003], Adam epsilon 1e-08, THICK contours:
 
+
+2/25:
+[10000, 5000, 5000], [0.001, 0.0007, 0.0003], Adam epsilon 1e-08, variable contours, edge guarantee, type-distributed val set
+tensorboard --logdir=training-runs/bs5_resinit6/summary/train
+IOUs steadily went up, loss barely moved. Used perimeter based contour widths
+
+2/26
+[8000, 8000, 8000, 8000], [0.005, 0.001, 0.0007, 0.0003], Adam epsilon 1e-08, variable contours, edge guarantee, type-distributed val set
+tensorboard --logdir=training-runs/bs5_resinit7/summary/train
