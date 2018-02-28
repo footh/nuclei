@@ -26,8 +26,24 @@ VALIDATION_PCT = 15
 VAL_INTERVAL = 300
 TRAIN_BASE_DIR = 'training-runs'
 L2_WEIGHT_DECAY = 0.0001
-#SEG_RATIO = 0.13405
-#CON_RATIO = 0.04466
+# SEG_RATIO = 0.13405
+# CON_RATIO = 0.04466
+
+
+def aux_loss(logits_seg_arr, logits_con_arr, labels_seg, labels_con, step):
+    """
+        Derives auxiliary loss per DCAN paper for each upsampled output. Weighted based on step number but weights
+        are just guesses based on the paper
+    """
+    segment_losses = []
+    for i, logits in enumerate(logits_seg_arr):
+        scope = f"aux_segment_{i}"
+        segment_losses.append(tf.losses.sigmoid_cross_entropy(labels_seg, logits, scope=scope))
+
+    contour_losses = []
+    for i, logits in enumerate(logits_con_arr):
+        scope = f"aux_contour_{i}"
+        contour_losses.append(tf.losses.sigmoid_cross_entropy(labels_con, logits, scope=scope))
 
 
 def loss(logits_seg, logits_con, labels_seg, labels_con):

@@ -120,12 +120,12 @@ def build_resnet50_v2(img_input, is_training=True):
     return block2, block3, block4
 
 
-def upsample_and_fuse(ds_layers, img_size):
+def upsample(ds_layers, img_size, add_conv=False):
     """
-        Takes in a collection of downsampled layers, applies two transposed convolutions for each input layer and
-        fuses each path into one
+        Takes in a collection of downsampled layers, applies two transposed convolutions for each input layer returns
+        the results. A 1x1 convolution can be added after the upsample via parameter
         
-        Returns the two fused layers, one for contours and one for segments
+        Returns the upsampled layers for segments and contours as separate arrays
         
         kernel size calculated per here:
         http://warmspringwinds.github.io/tensorflow/tf-slim/2016/11/22/upsampling-and-image-segmentation-with-tensorflow-and-tf-slim/        
@@ -143,7 +143,11 @@ def upsample_and_fuse(ds_layers, img_size):
         kernel = 2 * factor - factor % 2
 
         tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
-        
+
+        tconv_activation = None
+        if add_conv:
+            tconv_activation = tf.nn.relu
+
         # Default xavier_initializer is used for the weights here.
         # TODO: this is uniform, should use gaussian per dcan paper?
         net = layers.conv2d_transpose(ds_layer, 
@@ -151,8 +155,12 @@ def upsample_and_fuse(ds_layers, img_size):
                                       kernel, 
                                       factor, 
                                       padding='SAME', 
-                                      activation_fn=None, 
+                                      activation_fn=tconv_activation,
                                       scope=f"tconv{i+1}_seg")
+
+        if add_conv:
+            net = layers.conv2d(net, 1, 1, activation_fn=None)
+
         segment_outputs.append(net)
 
         net = layers.conv2d_transpose(ds_layer,
@@ -160,14 +168,15 @@ def upsample_and_fuse(ds_layers, img_size):
                                       kernel, 
                                       factor,
                                       padding='SAME', 
-                                      activation_fn=None, 
+                                      activation_fn=tconv_activation,
                                       scope=f"tconv{i+1}_con")
+
+        if add_conv:
+            net = layers.conv2d(net, 1, 1, activation_fn=None)
+
         contour_outputs.append(net)
     
-    fuse_seg = tf.add_n(segment_outputs, name="fuse_seg")
-    fuse_con = tf.add_n(contour_outputs, name="fuse_con")
-    
-    return fuse_seg, fuse_con
+    return segment_outputs, contour_outputs
 
 
 def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_weight_decay=0.0001):
@@ -185,6 +194,8 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
     with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose], 
                                                                 weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
 
-        fuse_seg, fuse_con = upsample_and_fuse(ds_layers, img_size)
+        segment_outputs, contour_outputs = upsample(ds_layers, img_size, add_conv=False)
+        fuse_seg = tf.add_n(segment_outputs, name="fuse_seg")
+        fuse_con = tf.add_n(contour_outputs, name="fuse_con")
 
     return fuse_seg, fuse_con
