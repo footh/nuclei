@@ -137,7 +137,7 @@ def _draw_contours(src, dest):
         Finds contours on src array and writes them to dest array
     """
     contours = measure.find_contours(src, 0.5)  # TODO: investigate this parameter
-    #assert(len(contours) == 1)
+    # assert(len(contours) == 1)
     rprops = measure.regionprops(src // 255)
     minor_axis = rprops[0].minor_axis_length
     assert(minor_axis > 0)
@@ -202,7 +202,7 @@ def setup(src='train', with_masks=True, early_stop=None):
     flist = raw_file_list(src=src)
     for cnt, f in enumerate(flist):
         name, ext = os.path.basename(f).split('.')
-        print(f"{cnt}: Processing {name}...")
+        print(f"{cnt + 1}: Processing {name}...")
 
         if early_stop is not None and cnt > early_stop:
             break
@@ -258,6 +258,8 @@ def which_set(file_id, validation_pct, testing_pct, radix=MAX_NUM_PER_CLASS):
     """
     file_id_hashed = hashlib.sha1(compat.as_bytes(file_id)).hexdigest()
     percentage_hash = ((int(file_id_hashed, 16) % (radix + 1)) * (100.0 / radix))
+    percentage_hash = int(percentage_hash)
+    print(f"percentage_hash: {percentage_hash}")
 
     if percentage_hash < validation_pct:
         result = 'valid'
@@ -265,7 +267,7 @@ def which_set(file_id, validation_pct, testing_pct, radix=MAX_NUM_PER_CLASS):
         result = 'test'
     else:
         result = 'train'
-    
+    print(result)
     return result
 
 
@@ -345,7 +347,7 @@ class DataProcessor:
         class_dict = self._classes()
 
         for class_key, id_list in class_dict.items():
-            print(f"Allotting for class: {class_key}")
+            tf.logging.info(f"Allotting for class: {class_key}")
             for id in id_list:
                 idx = which_set(id, self.validation_pct, self.testing_pct, radix=len(id_list))
                 self.data_index[idx].append(id)
@@ -372,10 +374,10 @@ class DataProcessor:
             id_list = [os.path.splitext(v)[0] for v in value]
             result[key] = id_list
 
-            print(f"{key}: {len(id_list)}")
+            tf.logging.info(f"{key}: {len(id_list)}")
             ttl += len(id_list)
 
-        print(f"Total unique files found: {ttl}")
+        tf.logging.info(f"Total unique files found: {ttl}")
 
         return result
         
@@ -478,24 +480,25 @@ class DataProcessor:
 
     def _valid_crop(self, sample_con):
         """
-            Return if a valid crop was attained and the top, left coordinates. Valid crops must meet or exceed the configured contour ratio.
-            If all tries are attempted without a hit, the last top, left attempt is returned.
+            Return if a valid crop was attained and the top, left coordinates. Valid crops must meet or exceed the
+            configured contour ratio. If all tries are attempted without a hit, the last top, left attempt is returned.
         """
         # Will attempt crops based on the size of the image (larger image will have more attempts)
         CROP_ATTEMPTS_PER = 10
         crop_factor = (math.ceil(sample_con.shape[0] / self.img_size) - 1) + (math.ceil(sample_con.shape[1] / self.img_size) - 1)
         crop_attempts_max = CROP_ATTEMPTS_PER * crop_factor
-        if crop_attempts_max == 0: crop_attempts_max = 1
+        if crop_attempts_max == 0:
+            crop_attempts_max = 1
         tf.logging.debug(f"Maximum crop attempts: {crop_attempts_max}")
 
         hit = False
         for i in range(crop_attempts_max):
             top, left = self._sampling_points(sample_con)
             cropped_sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
-            ratio = np.sum(cropped_sample_con > 0) / np.prod(cropped_sample_con.shape)
-            tf.logging.debug(f"Contour ratio: {ratio}")
+            con_ratio = np.sum(cropped_sample_con > 0) / np.prod(cropped_sample_con.shape)
+            tf.logging.debug(f"Contour ratio: {con_ratio}")
 
-            if ratio >= CONTOUR_FREQ_RATIO:
+            if con_ratio >= CONTOUR_FREQ_RATIO:
                 tf.logging.debug(f"Contour ratio hit: {top}, {left}")
                 hit = True
                 break
