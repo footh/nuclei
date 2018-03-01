@@ -263,7 +263,7 @@ def which_set(file_id, validation_pct, testing_pct, radix=MAX_NUM_PER_CLASS):
 
     if percentage_hash < validation_pct:
         result = 'valid'
-    elif percentage_hash < (testing_pct + validation_pct):
+    elif percentage_hash < (testing_pct + validation_pct + 1):
         result = 'test'
     else:
         result = 'train'
