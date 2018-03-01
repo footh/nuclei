@@ -380,7 +380,23 @@ class DataProcessor:
         return result
         
     def mode_size(self, mode='train'):
-        return len(self.data_index[mode])        
+        return len(self.data_index[mode])      
+
+    def copy_id(self, id, src='valid'):
+        """
+            Copy files from given id to given source
+        """
+        tf.logging.info(f"Copying files with id {id}...")
+        search_path = os.path.join(self.src_dir, f"{id}-*.{IMG_EXT}")
+        for img_path in gfile.Glob(search_path):
+            shutil.copy2(img_path, os.path.join(self.src_dir, '..', src))
+    
+    def copy_mode(self, mode='valid', src='valid'):
+        """
+            Copy files from given mode to given source
+        """
+        for id in self.data_index[mode]:
+            self.copy_id(id, src=src)
 
     def _pad_to_size(self, sample):
         """
@@ -648,5 +664,57 @@ class DataProcessor:
                 for j in range(tiles.shape[1]):
                     img = Image.fromarray(np.asarray(tiles[i, j, :], dtype=np.uint8))
                     img.save(f"/tmp/nuclei/r{i}c{j}.png")
+
+        return tiles, sample_info
+    
+    def batch_test_abut(self, offset=0, normalize=True):
+        """
+            Same as 'batch_test' except tiles are not overlapped but are abut
+        """
+        sample_info = {}
+        
+        sample_id = self.data_index['test'][offset]
+        sample_info['id'] = sample_id
+
+        sample_src = np.asarray(Image.open(os.path.join(self.src_dir, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
+        if _DEBUG_WRITE_:
+            img = Image.fromarray(sample_src)
+            img.save(f"/tmp/nuclei/original.png")
+        tf.logging.debug(f"sample original shape: {sample_src.shape}")
+        sample_info['orig_shape'] = sample_src.shape
+        sample_src = sample_src[:, :, 0:IMG_CHANNELS]
+        
+        padding_row = (0, 0)
+        if sample_src.shape[0] % self.img_size > 0:
+            padding_ttl = self.img_size - (sample_src.shape[0] % self.img_size)
+            padding_row = (padding_ttl // 2, padding_ttl - padding_ttl // 2)
+        
+        padding_col = (0, 0)
+        if sample_src.shape[1] % self.img_size > 0:
+            padding_ttl = self.img_size - (sample_src.shape[1] % self.img_size)
+            padding_col = (padding_ttl // 2, padding_ttl - padding_ttl // 2)
+
+        tf.logging.debug(f"padding_row, padding_col: {padding_row}, {padding_col}")
+        sample_info['padding_row'] = padding_row
+        sample_info['padding_col'] = padding_col
+        sample_src = np.pad(sample_src, (padding_row, padding_col, (0, 0)), mode='reflect')
+
+        tf.logging.debug(f"sample padded shape: {sample_src.shape}")
+        prows, pcols, _ = sample_src.shape
+        
+        sample_src = np.asarray(sample_src, dtype=np.float32)
+        if normalize:
+            # Slim's vgg_preprocessing only does the mean subtraction (not the RGB to BGR)
+            sample_src = sample_src - VGG_RGB_MEANS
+
+        tiles = []
+        for i in range(0, prows, self.img_size):
+            tiles.append([])
+            for j in range(0, pcols, self.img_size):
+                tile = sample_src[i:i + self.img_size, j:j + self.img_size, :]
+                tiles[-1].append(tile)
+
+        tiles = np.asarray(tiles)
+        tf.logging.debug(f"tiles.shape: {tiles.shape}")
 
         return tiles, sample_info

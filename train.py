@@ -12,15 +12,15 @@ MODEL_SCOPE = "dcan"
 # TODO: parameterize these
 TRAINING_STEPS = [8000, 8000, 8000, 8000]
 # For discrete learning rates
-LEARNING_RATES = [0.005, 0.001, 0.0007, 0.0003]
+LEARNING_RATES = [0.002, 0.001, 0.0007, 0.0003]
 # For exponential decay learning rate based on valid loss progress
-VALID_LOSS_STREAK_MAX = 10
-EXPONENTIAL_DECAY_BASE = 0.5
+VALID_LOSS_STREAK_MAX = 15
+EXPONENTIAL_DECAY_BASE = 0.8
 LEARNING_RATE_BASE = 0.001
 # For Adam optimizer
-ADAM_EPSILON = 1e-08
+ADAM_EPSILON = 1e-04
 # For Momentum optimizer
-MOMENTUM = 0.2
+MOMENTUM = 0.8
 
 VALIDATION_PCT = 15
 VAL_INTERVAL = 300
@@ -182,8 +182,8 @@ def train():
     with tf.name_scope('train'), tf.control_dependencies(update_ops):
 
         lr_input = tf.placeholder(tf.float32, [], name='learning_rate_input')
-        # train_op = tf.train.AdamOptimizer(learning_rate=lr_input, epsilon=ADAM_EPSILON).minimize(total_loss)
-        train_op = tf.train.MomentumOptimizer(learning_rate=lr_input, momentum=MOMENTUM).minimize(total_loss)
+        train_op = tf.train.AdamOptimizer(learning_rate=lr_input, epsilon=ADAM_EPSILON).minimize(total_loss)
+        # train_op = tf.train.MomentumOptimizer(learning_rate=lr_input, momentum=MOMENTUM).minimize(total_loss)
 
     global_step = tf.train.get_or_create_global_step()
     increment_global_step = tf.assign(global_step, global_step + 1)

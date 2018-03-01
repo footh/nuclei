@@ -33,13 +33,33 @@ Cut at around 17K iterations. The contour predictions were even worse in terms o
 for the algorithm to key off of. I *think* the segments weren't as good with the smaller training steps but not entirely sure.
 
 [10000, 5000, 5000], [0.001, 0.0007, 0.0003], Adam epsilon 1e-08, THICK contours:
-
+tensorboard --logdir=training-runs/bs5_resinit5/summary/train
 
 2/25:
 [10000, 5000, 5000], [0.001, 0.0007, 0.0003], Adam epsilon 1e-08, variable contours, edge guarantee, type-distributed val set
+Used perimeter based contour widths. No weights on loss (proportions were basically even)
 tensorboard --logdir=training-runs/bs5_resinit6/summary/train
-IOUs steadily went up, loss barely moved. Used perimeter based contour widths
+IOUs steadily went up, loss barely moved. 
 
 2/26
-[8000, 8000, 8000, 8000], [0.005, 0.001, 0.0007, 0.0003], Adam epsilon 1e-08, variable contours, edge guarantee, type-distributed val set
+[8000, 8000, 8000, 8000], [0.002, 0.001, 0.0007, 0.0003], Adam epsilon 1e-08, variable contours, edge guarantee, type-distributed val set
+Used minor axis based contour lengths. No weights on loss (proportions favored segments like .13 to .09)
 tensorboard --logdir=training-runs/bs5_resinit7/summary/train
+Validation loss stopped going down at 15600. 
+
+54000 steps, momentum optimizer, .001 base LR, 0.8 decay base, decays after 10 val loss with no progress, 0.2 momentum
+Used minor axis based contour lengths. No weights on loss (proportions favored segments like .13 to .09)
+tensorboard --logdir=training-runs/bs5_resinit8/summary/train
+Validation loss was still going down even at 54000, did not reach the val loss of Adam run above. 
+
+2/27:
+54000 steps, momentum optimizer, .001 base LR, 0.8 decay base, decays after 10 val loss with no progress, 0.8 momentum
+Used minor axis based contour lengths. No weights on loss (proportions favored segments like .13 to .09)
+tensorboard --logdir=training-runs/bs5_resinit9/summary/train
+
+32000 steps, Adam 1e-4 epsilon, 0.001 base LR, 0.8 decay base, decay after 15...oops
+Minor axis based contour lengths, No weights on loss
+Added 1x1x1 convolution layer after tconv :shrug:
+tensorboard --logdir=training-runs/bs5_resinit10/summary/train
+- At step 155, the IOU contour went from 0.000 to ~0.400, higher than the segment at the time. Weird.
+- Killed after 22K steps, val loss was going up for a while

@@ -159,7 +159,7 @@ def upsample(ds_layers, img_size, add_conv=False):
                                       scope=f"tconv{i+1}_seg")
 
         if add_conv:
-            net = layers.conv2d(net, 1, 1, activation_fn=None)
+            net = layers.conv2d(net, 1, 1, activation_fn=None, scope=f"conv{i+1}_seg")
 
         segment_outputs.append(net)
 
@@ -172,7 +172,7 @@ def upsample(ds_layers, img_size, add_conv=False):
                                       scope=f"tconv{i+1}_con")
 
         if add_conv:
-            net = layers.conv2d(net, 1, 1, activation_fn=None)
+            net = layers.conv2d(net, 1, 1, activation_fn=None, scope=f"conv{i+1}_con")
 
         contour_outputs.append(net)
     
@@ -194,7 +194,7 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
     with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose], 
                                                                 weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
 
-        segment_outputs, contour_outputs = upsample(ds_layers, img_size, add_conv=False)
+        segment_outputs, contour_outputs = upsample(ds_layers, img_size, add_conv=True)
         fuse_seg = tf.add_n(segment_outputs, name="fuse_seg")
         fuse_con = tf.add_n(contour_outputs, name="fuse_con")
 
