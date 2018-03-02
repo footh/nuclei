@@ -5,7 +5,6 @@ import model
 import util
 import numpy as np
 import scipy
-from scipy.interpolate.interpolate import spline
 from collections import OrderedDict
 from scipy import ndimage as ndi
 from skimage import morphology
@@ -16,6 +15,27 @@ OVERLAP_CONST = 2
 
 _DEBUG_ = True
 _DEBUG_WRITE_ = False
+
+
+# Run-length encoding taken from https://www.kaggle.com/rakhlin/fast-run-length-encoding-python
+def rle_encoding(x):
+    dots = np.where(x.T.flatten() == 1)[0]
+    run_lengths = []
+    prev = -2
+    for b in dots:
+        if b > prev + 1:
+            run_lengths.extend((b + 1, 0))
+
+        run_lengths[-1] += 1
+        prev = b
+
+    return run_lengths
+
+
+def prob_to_rles(labels):
+    for i in range(1, labels.max() + 1):
+        yield rle_encoding(labels == i)
+
 
 # -------------------------------------------------
 # Image transforms
@@ -28,7 +48,6 @@ def threshold(img, method='otsu'):
 #         fig, ax = try_all_threshold(img, figsize=(10, 8), verbose=False)
 #         plt.show()
 #     
-    thresh = None
     if method == 'otsu':
         thresh = filters.threshold_otsu(img)
     elif method == 'mean':
@@ -39,6 +58,7 @@ def threshold(img, method='otsu'):
     binary = img > thresh
     return binary
 
+
 def close_filter(img, rad=2, times=1):
     selem = morphology.disk(rad)
     close_img = img
@@ -47,6 +67,7 @@ def close_filter(img, rad=2, times=1):
         
     return close_img
 
+
 def open_filter(img, rad=2, times=1):
     selem = morphology.disk(rad)
     open_img = img
@@ -54,6 +75,7 @@ def open_filter(img, rad=2, times=1):
         open_img = morphology.opening(open_img, selem)
         
     return open_img
+
 
 def run_transforms(imga, transforms):
 
@@ -142,9 +164,12 @@ def post_process(result_seg, result_con):
     result = morphology.watershed(-distance_seg, labels, mask=thresh_seg)
     if _DEBUG_:
         util.plot_compare(labels, result, "labels", "result")
+
+    # TODO: close the result? May help if holes are common but might not if it closes valid cracks
+    return result
     
 
-def evaluate(trained_checkpoint, src='test', pixel_threshold=0.5, contour_threshold=0.5, use_spline=True):
+def evaluate(trained_checkpoint, src='test', use_spline=True):
     # TODO: parameterize
     window_size = train.IMG_SIZE
     
@@ -210,9 +235,9 @@ def evaluate(trained_checkpoint, src='test', pixel_threshold=0.5, contour_thresh
         result_seg = result_seg[padding:padding + orig_rows, padding: padding + orig_cols]
         result_con = result_con[padding:padding + orig_rows, padding: padding + orig_cols]
 
-        post_process(result_seg, result_con)
-        
-        #util._debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
+        # util._debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
+
+        return post_process(result_seg, result_con)
 
 
 def evaluate_abut(trained_checkpoint, src='test', pixel_threshold=0.5, contour_threshold=0.5):
@@ -278,20 +303,16 @@ def main(_):
 
     tf.logging.set_verbosity(tf.logging.INFO)
 
-    evaluate(FLAGS.trained_checkpoint, FLAGS.src, FLAGS.pixel_threshold, FLAGS.contour_threshold)
+    evaluate(FLAGS.trained_checkpoint, FLAGS.src)
 
 
 tf.app.flags.DEFINE_string(
     'trained_checkpoint', None,
     'The checkpoint to initialize evaluation from')
 
-tf.app.flags.DEFINE_float(
-    'pixel_threshold', 0.5,
-    'The threshold above which a prediction is considered a positive pixel')
-
-tf.app.flags.DEFINE_float(
-    'contour_threshold', 0.5,
-    'The threshold below which a prediction not considered a boundary')
+# tf.app.flags.DEFINE_float(
+#     'pixel_threshold', 0.5,
+#     'The threshold above which a prediction is considered a positive pixel')
 
 tf.app.flags.DEFINE_string(
     'src', 'test',
