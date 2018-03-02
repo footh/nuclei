@@ -259,15 +259,20 @@ def which_set(file_id, validation_pct, testing_pct, radix=MAX_NUM_PER_CLASS):
     file_id_hashed = hashlib.sha1(compat.as_bytes(file_id)).hexdigest()
     percentage_hash = ((int(file_id_hashed, 16) % (radix + 1)) * (100.0 / radix))
     percentage_hash = int(percentage_hash)
-    print(f"percentage_hash: {percentage_hash}")
+    
+    if validation_pct == 100:
+        return 'valid'
+    
+    if testing_pct == 100:
+        return 'test'
 
     if percentage_hash < validation_pct:
         result = 'valid'
-    elif percentage_hash < (testing_pct + validation_pct + 1):
+    elif percentage_hash < (testing_pct + validation_pct):
         result = 'test'
     else:
         result = 'train'
-    print(result)
+
     return result
 
 

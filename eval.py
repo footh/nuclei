@@ -2,78 +2,71 @@ import tensorflow as tf
 import train
 import data
 import model
+import util
 import numpy as np
-import shutil
-import os
-from PIL import Image
-from skimage import filters
-from skimage import morphology
 import scipy
 from scipy.interpolate.interpolate import spline
+from collections import OrderedDict
+from scipy import ndimage as ndi
+from skimage import morphology
+from skimage import filters
+from matplotlib import pyplot as plt
 
 OVERLAP_CONST = 2
 
-def _debug_output(dp, sample_id, result_seg, result_con, divisors):
-    print(f"seg: {np.sum(result_seg > 1)}")
-    print(f"con: {np.sum(result_con > 1)}")
+_DEBUG_ = True
+_DEBUG_WRITE_ = False
 
-    seg_name = f"{sample_id}-{data.IMG_SEGMENT}.type.{data.IMG_EXT}"
-    con_name = f"{sample_id}-{data.IMG_CONTOUR}.type.{data.IMG_EXT}"
+# -------------------------------------------------
+# Image transforms
+def threshold(img, method='otsu'):
+    """
+        Return binary image based on threshold method
+    """
+#     if _DEBUG_:
+#         from skimage.filters import try_all_threshold
+#         fig, ax = try_all_threshold(img, figsize=(10, 8), verbose=False)
+#         plt.show()
+#     
+    thresh = None
+    if method == 'otsu':
+        thresh = filters.threshold_otsu(img)
+    elif method == 'mean':
+        thresh = filters.threshold_mean(img)
+    else:
+        thresh = filters.threshold_li(img)
+        
+    binary = img > thresh
+    return binary
+
+def close_filter(img, rad=2, times=1):
+    selem = morphology.disk(rad)
+    close_img = img
+    for i in range(times):
+        close_img = morphology.closing(close_img, selem)
+        
+    return close_img
+
+def open_filter(img, rad=2, times=1):
+    selem = morphology.disk(rad)
+    open_img = img
+    for i in range(times):
+        open_img = morphology.opening(open_img, selem)
+        
+    return open_img
+
+def run_transforms(imga, transforms):
+
+    transformed_image = np.copy(imga)
+    for method, kwargs in transforms.items():
+        imgt = method(transformed_image, **kwargs)
+        if _DEBUG_:
+            util.plot_compare(transformed_image, imgt, title1=f"pre-{method.__name__}", title2=f"post-{method.__name__}")
+        transformed_image = imgt
     
-    dp.copy_id(sample_id, src='debug')
-
-    result_seg_out = np.asarray(result_seg * 255, dtype=np.uint8)
-    result_con_out = np.asarray(result_con * 255, dtype=np.uint8)
-    Image.fromarray(result_seg_out).save(os.path.join(dp.src_dir, '..', 'debug', seg_name.replace('type', 'pred')))
-    Image.fromarray(result_con_out).save(os.path.join(dp.src_dir, '..', 'debug', con_name.replace('type', 'pred')))
+    return transformed_image
+# -------------------------------------------------    
     
-    selem = morphology.disk(3)
-
-    # Pipeline #1: Preds -> Close -> Thresh -> Diff
-    result_seg_c = morphology.closing(result_seg, selem)
-    result_con_c = morphology.closing(result_con, selem)
-
-    result_seg_c = np.asarray(result_seg_c * 255, dtype=np.uint8)
-    result_con_c = np.asarray(result_con_c * 255, dtype=np.uint8)
-    Image.fromarray(result_seg_c).save(os.path.join(dp.src_dir, '..', 'debug', seg_name.replace('type', 'predc1')))
-    Image.fromarray(result_con_c).save(os.path.join(dp.src_dir, '..', 'debug', con_name.replace('type', 'predc1')))
-
-    prob_seg_c = filters.threshold_otsu(result_seg_c)
-    prob_con_c = filters.threshold_otsu(result_con_c)
-    print(f"thresh_seg, thresh_con: {prob_seg_c}, {prob_con_c}")
-
-    thresh_seg_c1 = np.asarray(result_seg_c > prob_seg_c, dtype=np.uint8) * 255
-    thresh_con_c1 = np.asarray(result_con_c > prob_con_c, dtype=np.uint8) * 255
-    Image.fromarray(thresh_seg_c1).save(os.path.join(dp.src_dir, '..', 'debug', seg_name.replace('type', 'thr1')))
-    Image.fromarray(thresh_con_c1).save(os.path.join(dp.src_dir, '..', 'debug', con_name.replace('type', 'thr1')))
-
-    thresh_con_c1e = morphology.erosion(thresh_con_c1, morphology.square(2))
-    Image.fromarray(thresh_con_c1e).save(os.path.join(dp.src_dir, '..', 'debug', con_name.replace('type', 'thr1e')))
-
-    diff_1 = np.maximum(thresh_seg_c1 - thresh_con_c1e, 0)
-    Image.fromarray(diff_1).save(os.path.join(dp.src_dir, '..', 'debug', con_name.replace('con.type', 'diff1')))
-
-    # Pipeline #2: Preds -> Thresh -> Close -> Diff
-    prob_seg = filters.threshold_otsu(result_seg)
-    prob_con = filters.threshold_otsu(result_con)
-    print(f"thresh_seg, thresh_con: {prob_seg}, {prob_con}")
-
-    thresh_seg = np.asarray(result_seg > prob_seg, dtype=np.uint8) * 255
-    thresh_con = np.asarray(result_con > prob_con, dtype=np.uint8) * 255
-    Image.fromarray(thresh_seg).save(os.path.join(dp.src_dir, '..', 'debug', seg_name.replace('type', 'thr2')))
-    Image.fromarray(thresh_con).save(os.path.join(dp.src_dir, '..', 'debug', con_name.replace('type', 'thr2')))
-
-    thresh_seg_c2 = morphology.closing(thresh_seg, selem)
-    thresh_con_c2 = morphology.closing(thresh_con, selem)
-    Image.fromarray(thresh_seg_c2).save(os.path.join(dp.src_dir, '..', 'debug', seg_name.replace('type', 'thrc2')))
-    Image.fromarray(thresh_con_c2).save(os.path.join(dp.src_dir, '..', 'debug', con_name.replace('type', 'thrc2')))
-    diff_2 = np.maximum(thresh_seg_c2 - thresh_con_c2, 0)
-    Image.fromarray(diff_2).save(os.path.join(dp.src_dir, '..', 'debug', con_name.replace('con.type', 'diff2')))
-
-    #m = np.max(divisors)
-    #divisors = np.asarray((divisors / m) * 255, dtype=np.uint8)
-    #Image.fromarray(divisors).save(os.path.join(dp.src_dir, '..', 'debug', con_name.replace('con.type', 'div')))
-
     
 def _spline_window(window_size, power=2):
     """
@@ -117,6 +110,39 @@ def build_model(img_input):
 
     return pred_full
 
+
+def post_process(result_seg, result_con):
+    
+    transforms_seg = OrderedDict()
+    transforms_seg[threshold] = {}
+
+    transforms_con = OrderedDict()
+    transforms_con[threshold] = {}
+    #transforms_con[open_filter] = {}
+    
+    thresh_seg = run_transforms(result_seg, transforms_seg)
+    #thresh_con = run_transforms(result_con, transforms_con)
+    
+#     labels_con = morphology.label(thresh_con)
+#     if _DEBUG_:
+#         util.plot_compare(thresh_con, labels_con, "thresh_con", "labels_con")
+    
+    #segments = np.logical_and(thresh_seg, np.logical_not(thresh_con))
+    segments = (result_seg - 2 * result_con) > 0.05
+    if _DEBUG_:
+        util.plot_compare(result_seg, result_con, "result_seg", "result_con")
+        util.plot_compare(result_seg, segments, "result_seg", "segments")
+
+    labels = morphology.label(segments)
+    if _DEBUG_:
+        util.plot_compare(segments, labels, "segments", "labels")
+    
+    distance_seg = ndi.distance_transform_edt(thresh_seg)
+    
+    result = morphology.watershed(-distance_seg, labels, mask=thresh_seg)
+    if _DEBUG_:
+        util.plot_compare(labels, result, "labels", "result")
+    
 
 def evaluate(trained_checkpoint, src='test', pixel_threshold=0.5, contour_threshold=0.5, use_spline=True):
     # TODO: parameterize
@@ -183,8 +209,10 @@ def evaluate(trained_checkpoint, src='test', pixel_threshold=0.5, contour_thresh
         orig_rows, orig_cols = sample_info['orig_shape'][0:2]
         result_seg = result_seg[padding:padding + orig_rows, padding: padding + orig_cols]
         result_con = result_con[padding:padding + orig_rows, padding: padding + orig_cols]
+
+        post_process(result_seg, result_con)
         
-        _debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
+        #util._debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
 
 
 def evaluate_abut(trained_checkpoint, src='test', pixel_threshold=0.5, contour_threshold=0.5):
@@ -238,8 +266,10 @@ def evaluate_abut(trained_checkpoint, src='test', pixel_threshold=0.5, contour_t
         padding_col = sample_info['padding_col']
         result_seg = result_seg[padding_row[0]:full_pred_rows - padding_row[1], padding_col[0]:full_pred_cols - padding_col[1]]
         result_con = result_con[padding_row[0]:full_pred_rows - padding_row[1], padding_col[0]:full_pred_cols - padding_col[1]]
+
+        post_process(result_seg, result_con)
     
-        _debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
+        #util._debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
 
 
 def main(_):
