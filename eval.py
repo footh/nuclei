@@ -17,6 +17,7 @@ OVERLAP_CONST = 2
 
 _DEBUG_ = True
 _DEBUG_WRITE_ = True
+tf.logging.set_verbosity(tf.logging.DEBUG)
 
 if _DEBUG_:
     from skimage.color import label2rgb
@@ -187,7 +188,7 @@ def post_process(result_seg, result_con):
         # TODO: parameterize (maybe based on image size or average size of objects?)
         size = np.sum(result == i)
         sizes.append(size)
-        if size > 5:
+        if size > 10:
             result_sized[result==i] = i - size_misses
         else:
             size_misses += 1
@@ -200,6 +201,10 @@ def post_process(result_seg, result_con):
 
     # TODO: close the result? May help if holes are common but might not if it closes valid cracks
     # TODO: may also consider a close on 'segments'. 1-pixel borders may not be valid divisions (contours tend to create much bigger separations)
+    # TODO: may also consider an open on 'segments'. I've seen some very thin connections that were invalid
+    # TODO: remove really small labels, on purple ones, there's a lot of salt that gets labelled and can cause a segment INSIDE a larger one
+    # Definitely should consider running an open to remove salt especially on purple ones see #0-8
+    # TODO: another fix for above is to do the watershed separation method (see valid #52)
     # TODO: see clear_border method which removes dots near borders
     return result_sized
     
@@ -223,7 +228,7 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
         spline_window = _spline_window(window_size)
 
     rle_results = []
-    for cnt in range(42, 43):
+    for cnt in range(0, 1):
         sample_tiles, sample_info = data_processor.batch_test(offset=cnt, overlap_const=OVERLAP_CONST)
         if _DEBUG_WRITE_:
             data_processor.copy_id(sample_info['id'], src='debug')
@@ -232,10 +237,17 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
         tile_rows, tile_cols = sample_tiles.shape[0:2]
         tf.logging.info(f"tile_rows, tile_cols: {tile_rows}, {tile_cols}")
         
-        # TODO: with large number of tiles, may need to batch this further
         sample_batch = sample_tiles.reshape(tile_rows * tile_cols, *sample_tiles.shape[2:])
-    
-        sample_pred = sess.run(pred_full, feed_dict={img_input: sample_batch})
+
+        # TODO: parameterize
+        batch_size = 9
+        pred_batches = []
+        for i in range(0, sample_batch.shape[0], batch_size):
+            pred_batch = sess.run(pred_full, feed_dict={img_input: sample_batch[i:i + batch_size]})
+            pred_batches.append(pred_batch)
+
+        pred_batches = np.asarray(pred_batches)
+        sample_pred = pred_batches.reshape(pred_batches.shape[0] * pred_batches.shape[1], *pred_batches.shape[2:])
         tf.logging.info(f"sample_pred.shape: {sample_pred.shape}")
     
         sample_pred = sample_pred.reshape(tile_rows, tile_cols, *sample_pred.shape[1:])
@@ -299,7 +311,7 @@ def evaluate_abut(trained_checkpoint, src='test', pixel_threshold=0.5, contour_t
 
     data_processor = data.DataProcessor(src=src, img_size=window_size, testing_pct=100)
 
-    for cnt in range(5,10):
+    for cnt in range(5, 10):
         sample_tiles, sample_info = data_processor.batch_test_abut(offset=cnt)
         
         # Prediction --------------------------------

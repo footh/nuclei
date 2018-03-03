@@ -25,9 +25,9 @@ def plot_compare(img1, img2, title1='Image1', title2='Image2'):
     plt.show()
 
 
-def plot_hist(data, bins=50, ticks=(0, 1500, 25)):
+def plot_hist(data, bins=50, ticks=(0, 1000, 20)):
     
-    plt.figure(figsize=(20, 20))
+    plt.figure(figsize=(15, 15))
     n, bins, patches = plt.hist(data, bins)
     #plt.xlabel('Perimeter Size')
     #plt.ylabel('Frequency')

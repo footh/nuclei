@@ -45,7 +45,7 @@ CONTOUR_FREQ_RATIO = 0.008 # Ratio of positive contour labels that must be in a 
 CONTOUR_FREQ = 0.5 # Percentage of a batch that must contain contour label hits
 CONTOUR_CONTINUE_MAX = 100 # Amount of times to try a different sample before just moving on with the batch
 
-_DEBUG_ = False
+_DEBUG_ = True
 _DEBUG_WRITE_ = False
 
 
