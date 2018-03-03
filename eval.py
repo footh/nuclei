@@ -9,12 +9,21 @@ from collections import OrderedDict
 from scipy import ndimage as ndi
 from skimage import morphology
 from skimage import filters
-from matplotlib import pyplot as plt
+import datetime
+import os
+import csv
 
 OVERLAP_CONST = 2
 
 _DEBUG_ = True
-_DEBUG_WRITE_ = False
+_DEBUG_WRITE_ = True
+
+if _DEBUG_:
+    from skimage.color import label2rgb
+    from matplotlib import pyplot as plt
+    
+if _DEBUG_WRITE_:
+    from skimage import img_as_ubyte
 
 
 # Run-length encoding taken from https://www.kaggle.com/rakhlin/fast-run-length-encoding-python
@@ -32,7 +41,7 @@ def rle_encoding(x):
     return run_lengths
 
 
-def prob_to_rles(labels):
+def rle_labels(labels):
     for i in range(1, labels.max() + 1):
         yield rle_encoding(labels == i)
 
@@ -60,7 +69,7 @@ def threshold(img, method='otsu'):
 
 
 def close_filter(img, rad=2, times=1):
-    selem = morphology.disk(rad)
+    selem = morphology.square(rad)
     close_img = img
     for i in range(times):
         close_img = morphology.closing(close_img, selem)
@@ -150,23 +159,49 @@ def post_process(result_seg, result_con):
 #         util.plot_compare(thresh_con, labels_con, "thresh_con", "labels_con")
     
     #segments = np.logical_and(thresh_seg, np.logical_not(thresh_con))
-    segments = (result_seg - 2 * result_con) > 0.05
+    # TODO: parameterize
+    segments = (result_seg - 1.75 * result_con) > 0.02
     if _DEBUG_:
         util.plot_compare(result_seg, result_con, "result_seg", "result_con")
         util.plot_compare(result_seg, segments, "result_seg", "segments")
+        
+    segments_cl = close_filter(segments)
+    if _DEBUG_:
+        util.plot_compare(segments, segments_cl, "segments", "segments_cl")
 
     labels = morphology.label(segments)
     if _DEBUG_:
-        util.plot_compare(segments, labels, "segments", "labels")
+        util.plot_compare(segments, label2rgb(labels, bg_label=0), "segments", "labels")
     
     distance_seg = ndi.distance_transform_edt(thresh_seg)
     
     result = morphology.watershed(-distance_seg, labels, mask=thresh_seg)
     if _DEBUG_:
-        util.plot_compare(labels, result, "labels", "result")
+        util.plot_compare(label2rgb(labels, bg_label=0), label2rgb(result, bg_label=0), "labels", "result")
+    tf.logging.info(f"Result label count: {result.max()}")
+    
+    result_sized = np.zeros(result.shape, dtype=result.dtype)
+    size_misses = 0
+    sizes = []
+    for i in range(1, result.max() + 1):
+        # TODO: parameterize (maybe based on image size or average size of objects?)
+        size = np.sum(result == i)
+        sizes.append(size)
+        if size > 5:
+            result_sized[result==i] = i - size_misses
+        else:
+            size_misses += 1
+    
+    if _DEBUG_:
+        util.plot_compare(label2rgb(result, bg_label=0), label2rgb(result_sized, bg_label=0), "result", "result_sized")
+        util.plot_hist(sizes)
+    tf.logging.info(f"Shape: {result.shape}, size min: {min(sizes)}, size max: {max(sizes)}, size avg: {np.mean(sizes)}")
+    tf.logging.info(f"Result label count (small labels removed): {result_sized.max()}")
 
     # TODO: close the result? May help if holes are common but might not if it closes valid cracks
-    return result
+    # TODO: may also consider a close on 'segments'. 1-pixel borders may not be valid divisions (contours tend to create much bigger separations)
+    # TODO: see clear_border method which removes dots near borders
+    return result_sized
     
 
 def evaluate(trained_checkpoint, src='test', use_spline=True):
@@ -187,8 +222,11 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
     if use_spline:
         spline_window = _spline_window(window_size)
 
-    for cnt in range(10, 11):
+    rle_results = []
+    for cnt in range(42, 43):
         sample_tiles, sample_info = data_processor.batch_test(offset=cnt, overlap_const=OVERLAP_CONST)
+        if _DEBUG_WRITE_:
+            data_processor.copy_id(sample_info['id'], src='debug')
     
         # Prediction --------------------------------
         tile_rows, tile_cols = sample_tiles.shape[0:2]
@@ -232,12 +270,18 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
         
         padding = sample_info['padding']
         orig_rows, orig_cols = sample_info['orig_shape'][0:2]
+        tf.logging.info(f"original shape: {orig_rows}, {orig_cols}")
         result_seg = result_seg[padding:padding + orig_rows, padding: padding + orig_cols]
         result_con = result_con[padding:padding + orig_rows, padding: padding + orig_cols]
 
         # util._debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
 
-        return post_process(result_seg, result_con)
+        result = post_process(result_seg, result_con)
+        
+        for rle_label in rle_labels(result):
+            rle_results.append([sample_info['id']] + rle_label)
+            
+        return rle_results
 
 
 def evaluate_abut(trained_checkpoint, src='test', pixel_threshold=0.5, contour_threshold=0.5):
@@ -292,9 +336,14 @@ def evaluate_abut(trained_checkpoint, src='test', pixel_threshold=0.5, contour_t
         result_seg = result_seg[padding_row[0]:full_pred_rows - padding_row[1], padding_col[0]:full_pred_cols - padding_col[1]]
         result_con = result_con[padding_row[0]:full_pred_rows - padding_row[1], padding_col[0]:full_pred_cols - padding_col[1]]
 
-        post_process(result_seg, result_con)
-    
-        #util._debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
+        # util._debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
+
+        result = post_process(result_seg, result_con)
+        
+        for rle_label in rle_labels(result):
+            rle_results.append([sample_info['id']] + rle_label)
+
+        return rle_results
 
 
 def main(_):
@@ -303,7 +352,17 @@ def main(_):
 
     tf.logging.set_verbosity(tf.logging.INFO)
 
-    evaluate(FLAGS.trained_checkpoint, FLAGS.src)
+    rle_results = evaluate(FLAGS.trained_checkpoint, FLAGS.src)
+    
+    if FLAGS.submission_file is not None:
+        submission_file_name = f"submission-{FLAGS.submission_file}-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+        submission_file_name = os.path.join('submissions', submission_file_name)
+        with open(submission_file_name, 'w') as submission_file:
+            wr = csv.writer(submission_file, delimiter=',')
+            wr.writerow(['ImageId', 'EncodedPixels'])
+    
+            for rle_result in rle_results:
+                wr.writerow(rle_result)
 
 
 tf.app.flags.DEFINE_string(
@@ -317,6 +376,10 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_string(
     'src', 'test',
     'The source directory to pull data from')
+
+tf.app.flags.DEFINE_string(
+    'submission_file', None,
+    'The name of the submission file to save (date will be automatically appended)')
 
 
 FLAGS = tf.app.flags.FLAGS

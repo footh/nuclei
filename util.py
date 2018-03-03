@@ -12,7 +12,7 @@ _DEBUG_ = False
 
 def plot_compare(img1, img2, title1='Image1', title2='Image2'):
     
-    fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 4), sharex=True, sharey=True)
+    fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(16, 8), sharex=True, sharey=True)
 
     ax1.imshow(img1, cmap=plt.cm.gray)
     ax1.set_title(title1)
@@ -23,6 +23,21 @@ def plot_compare(img1, img2, title1='Image1', title2='Image2'):
     ax2.axis('off')
     ax2.set_adjustable('box-forced')
     plt.show()
+
+
+def plot_hist(data, bins=50, ticks=(0, 1500, 25)):
+    
+    plt.figure(figsize=(20, 20))
+    n, bins, patches = plt.hist(data, bins)
+    #plt.xlabel('Perimeter Size')
+    #plt.ylabel('Frequency')
+    #plt.title('Histogram of Perimeter Size')
+    major_ticks = np.arange(*ticks)        
+    ax = plt.gca()
+    ax.set_xticks(major_ticks)
+    plt.xticks(rotation=90)    
+    plt.grid(True)
+    plt.show()    
 
 
 def _debug_output(dp, sample_id, result_seg, result_con, divisors):
