@@ -617,7 +617,8 @@ class DataProcessor:
             original image. A dictionary of the information about the sample is returned to aid in reconstruction. The tiles can be 
             normalized with the parameter.
             
-            The overlap_const determines the tile overlap ( 1 - 1/overlap_const is overlap percentage)
+            The overlap_const determines the tile overlap ( 1 - 1/overlap_const is overlap percentage). NOTE: this has not been tested
+            for anything other than 2
             
             Ex. shape (4, 2, 256, 256, 3) is 4 rows and two columns of 256x256x3 image tiles
         """
@@ -633,14 +634,20 @@ class DataProcessor:
         tf.logging.debug(f"sample original shape: {sample_src.shape}")
         sample_info['orig_shape'] = sample_src.shape
         sample_src = sample_src[:, :, 0:IMG_CHANNELS]
+        orig_rows, orig_cols, _ = sample_src.shape
 
-        padding = int(round(self.img_size * (1 - 1.0/overlap_const)))
-        tf.logging.debug(f"padding: {padding}")
-        if sample_src.shape[0] < padding or sample_src.shape[1] < padding:
-            raise ValueError(f"Padding size ({padding}) cannot be greater than any image dim ({sample_src.shape[0:2]})")
-        sample_info['padding'] = padding
+        pad_base = int(round(self.img_size * (1 - 1.0/overlap_const)))
+        pad_residual_row = pad_base - (orig_rows % pad_base) if orig_rows % pad_base > 0 else 0
+        pad_residual_col = pad_base - (orig_cols % pad_base) if orig_cols % pad_base > 0 else 0
         
-        sample_src = np.pad(sample_src, ((padding, padding), (padding, padding), (0, 0)), mode='reflect')
+        pad_row = (pad_base + pad_residual_row // 2, pad_base + (pad_residual_row - pad_residual_row // 2))
+        pad_col = (pad_base + pad_residual_col // 2, pad_base + (pad_residual_col - pad_residual_col // 2))
+        if sample_src.shape[0] < np.sum(pad_row) or sample_src.shape[1] < np.sum(pad_col):
+            tf.logging.info(f"WARNING: Padding size ({pad_row}, {pad_col}) is greater than an image dim ({sample_src.shape[0:2]})")
+        sample_info['pad_row'] = pad_row
+        sample_info['pad_col'] = pad_col
+        
+        sample_src = np.pad(sample_src, (pad_row, pad_col, (0, 0)), mode='reflect')
         tf.logging.debug(f"sample padded shape: {sample_src.shape}")
         prows, pcols, _ = sample_src.shape
         
@@ -654,9 +661,9 @@ class DataProcessor:
         sample_info['step'] = step
 
         tiles = []
-        for i in range(0, prows - self.img_size + 1, step):
+        for i in range(0, prows - step, step):
             tiles.append([])
-            for j in range(0, pcols - self.img_size + 1, step):
+            for j in range(0, pcols - step, step):
                 tile = sample_src[i:i + self.img_size, j:j + self.img_size, :]
                 tiles[-1].append(tile)
 

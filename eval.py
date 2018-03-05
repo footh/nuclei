@@ -15,9 +15,9 @@ import csv
 
 OVERLAP_CONST = 2
 
-_DEBUG_ = True
-_DEBUG_WRITE_ = True
-tf.logging.set_verbosity(tf.logging.DEBUG)
+_DEBUG_ = False
+_DEBUG_WRITE_ = False
+tf.logging.set_verbosity(tf.logging.INFO)
 
 if _DEBUG_:
     from skimage.color import label2rgb
@@ -161,14 +161,14 @@ def post_process(result_seg, result_con):
     
     #segments = np.logical_and(thresh_seg, np.logical_not(thresh_con))
     # TODO: parameterize
-    segments = (result_seg - 1.75 * result_con) > 0.02
+    segments = (result_seg - 1.8 * result_con) > 0.1
     if _DEBUG_:
         util.plot_compare(result_seg, result_con, "result_seg", "result_con")
         util.plot_compare(result_seg, segments, "result_seg", "segments")
         
-    segments_cl = close_filter(segments)
-    if _DEBUG_:
-        util.plot_compare(segments, segments_cl, "segments", "segments_cl")
+    #segments_cl = close_filter(segments)
+    #if _DEBUG_:
+    #    util.plot_compare(segments, segments_cl, "segments", "segments_cl")
 
     labels = morphology.label(segments)
     if _DEBUG_:
@@ -188,7 +188,7 @@ def post_process(result_seg, result_con):
         # TODO: parameterize (maybe based on image size or average size of objects?)
         size = np.sum(result == i)
         sizes.append(size)
-        if size > 10:
+        if size > 10 and size < 6000:
             result_sized[result==i] = i - size_misses
         else:
             size_misses += 1
@@ -228,7 +228,8 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
         spline_window = _spline_window(window_size)
 
     rle_results = []
-    for cnt in range(0, 1):
+    for cnt in range(0, data_processor.mode_size(mode='test')):
+        tf.logging.info(f"Evaluating file {cnt}")
         sample_tiles, sample_info = data_processor.batch_test(offset=cnt, overlap_const=OVERLAP_CONST)
         if _DEBUG_WRITE_:
             data_processor.copy_id(sample_info['id'], src='debug')
@@ -240,14 +241,13 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
         sample_batch = sample_tiles.reshape(tile_rows * tile_cols, *sample_tiles.shape[2:])
 
         # TODO: parameterize
-        batch_size = 9
+        batch_size = 8
         pred_batches = []
         for i in range(0, sample_batch.shape[0], batch_size):
             pred_batch = sess.run(pred_full, feed_dict={img_input: sample_batch[i:i + batch_size]})
             pred_batches.append(pred_batch)
 
-        pred_batches = np.asarray(pred_batches)
-        sample_pred = pred_batches.reshape(pred_batches.shape[0] * pred_batches.shape[1], *pred_batches.shape[2:])
+        sample_pred = np.concatenate(pred_batches)
         tf.logging.info(f"sample_pred.shape: {sample_pred.shape}")
     
         sample_pred = sample_pred.reshape(tile_rows, tile_cols, *sample_pred.shape[1:])
@@ -280,20 +280,22 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
             result_seg = result_seg / divisors
             result_con = result_con / divisors
         
-        padding = sample_info['padding']
-        orig_rows, orig_cols = sample_info['orig_shape'][0:2]
-        tf.logging.info(f"original shape: {orig_rows}, {orig_cols}")
-        result_seg = result_seg[padding:padding + orig_rows, padding: padding + orig_cols]
-        result_con = result_con[padding:padding + orig_rows, padding: padding + orig_cols]
+        pad_row = sample_info['pad_row']
+        pad_col = sample_info['pad_col']
+        #orig_rows, orig_cols = sample_info['orig_shape'][0:2]
+        tf.logging.info(f"original shape: {sample_info['orig_shape']}")
+        result_seg = result_seg[pad_row[0]:-pad_row[1], pad_col[0]:-pad_col[1]]
+        result_con = result_con[pad_row[0]:-pad_row[1], pad_col[0]:-pad_col[1]]
+        tf.logging.info(f"prediction final shape: {result_seg.shape}")
 
         # util._debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
 
         result = post_process(result_seg, result_con)
         
         for rle_label in rle_labels(result):
-            rle_results.append([sample_info['id']] + rle_label)
+            rle_results.append([sample_info['id']] + [rle_label])
             
-        return rle_results
+    return rle_results
 
 
 def evaluate_abut(trained_checkpoint, src='test', pixel_threshold=0.5, contour_threshold=0.5):
@@ -353,9 +355,9 @@ def evaluate_abut(trained_checkpoint, src='test', pixel_threshold=0.5, contour_t
         result = post_process(result_seg, result_con)
         
         for rle_label in rle_labels(result):
-            rle_results.append([sample_info['id']] + rle_label)
+            rle_results.append([sample_info['id']] + [rle_label])
 
-        return rle_results
+    return rle_results
 
 
 def main(_):
@@ -374,7 +376,11 @@ def main(_):
             wr.writerow(['ImageId', 'EncodedPixels'])
     
             for rle_result in rle_results:
-                wr.writerow(rle_result)
+                enc = ""
+                for r in rle_result[1]:
+                    enc += f"{r} "
+                
+                wr.writerow([rle_result[0], enc])
 
 
 tf.app.flags.DEFINE_string(

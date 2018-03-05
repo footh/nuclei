@@ -8,6 +8,7 @@ training-runs
 raw-data
 model-data
 debug
+submissions
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
