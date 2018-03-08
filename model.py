@@ -58,7 +58,7 @@ class BilinearInterp(init_ops.Initializer):
 bilinear_interp = BilinearInterp
 
 
-def custom_arg_scope(weight_decay=0.0001,
+def custom_arg_scope(weight_decay=0.01,
                      batch_norm_decay=0.997,
                      batch_norm_epsilon=1e-5,
                      batch_norm_scale=True,
@@ -84,12 +84,12 @@ def custom_arg_scope(weight_decay=0.0001,
                 return arg_sc    
 
 
-def build_custom(inputs, is_training=True):
+def build_custom(inputs, l2_weight_decay=0.01, is_training=True):
     tf.logging.info("CUSTOM")
     feature_root = 64
     
     blocks = []
-    with slim.arg_scope(custom_arg_scope()):
+    with slim.arg_scope(custom_arg_scope(weight_decay=l2_weight_decay)):
         with slim.arg_scope([slim.batch_norm], is_training=is_training):
             net = slim.conv2d(inputs, feature_root, (3, 3))
             
@@ -147,14 +147,14 @@ def resnet_v1_50(inputs,
       scope=scope)
 
 
-def build_resnet50_v1(img_input, is_training=True):
+def build_resnet50_v1(img_input, l2_weight_decay=0.01, is_training=True):
     """
         Builds resnet50_v1 model from slim, with strides reversed.
         
         Returns the last three block outputs to be used transposed convolution layers
     """
 
-    with slim.arg_scope(resnet_v1.resnet_arg_scope()):
+    with slim.arg_scope(resnet_v1.resnet_arg_scope(weight_decay=l2_weight_decay)):
         block4, endpoints = resnet_v1_50(img_input, is_training=is_training, global_pool=False)
 
     block3 = endpoints['resnet_v1_50/block3']
@@ -163,14 +163,14 @@ def build_resnet50_v1(img_input, is_training=True):
     return block2, block3, block4
 
 
-def build_resnet50_v2(img_input, is_training=True):
+def build_resnet50_v2(img_input, l2_weight_decay=0.01, is_training=True):
     """
         Builds resnet50_v2 model from slim
         
         Returns the last three block outputs to be used transposed convolution layers
     """
 
-    with slim.arg_scope(resnet_v2.resnet_arg_scope()):
+    with slim.arg_scope(resnet_v2.resnet_arg_scope(weight_decay=l2_weight_decay)):
         block4, endpoints = resnet_v2.resnet_v2_50(img_input, is_training=is_training, global_pool=False)
 
     block3 = endpoints['resnet_v2_50/block3']
@@ -179,10 +179,10 @@ def build_resnet50_v2(img_input, is_training=True):
     return block2, block3, block4
 
 
-def upsample_aft(ds_layers, img_size, add_conv=False):
+def upsample_aft(ds_layers, img_size):
     """
         Takes in a collection of downsampled layers, applies two transposed convolutions for each input layer returns
-        the results. A 1x1 convolution can be added after the upsample via parameter
+        the results. A 1x1 convolution is added after the upsample
         
         Returns the upsampled layers for segments and contours as separate arrays
         
@@ -203,10 +203,6 @@ def upsample_aft(ds_layers, img_size, add_conv=False):
 
         tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
         tf.logging.info(f"Layer shape: {ds_layer.shape.as_list()}")
-
-        tconv_activation = None
-        if add_conv:
-            tconv_activation = tf.nn.relu
 
         # Default xavier_initializer is used for the weights here.
         # TODO: this is uniform, should use gaussian per dcan paper?
@@ -215,11 +211,9 @@ def upsample_aft(ds_layers, img_size, add_conv=False):
                                       kernel, 
                                       factor, 
                                       padding='SAME', 
-                                      activation_fn=tconv_activation,
+                                      activation_fn=tf.nn.relu,
                                       scope=f"tconv{i+1}_seg")
-
-        if add_conv:
-            net = layers.conv2d(net, 1, 1, activation_fn=None, scope=f"conv{i+1}_seg")
+        net = layers.conv2d(net, 1, 1, activation_fn=None, scope=f"conv{i+1}_seg")
 
         segment_outputs.append(net)
 
@@ -228,21 +222,19 @@ def upsample_aft(ds_layers, img_size, add_conv=False):
                                       kernel, 
                                       factor,
                                       padding='SAME', 
-                                      activation_fn=tconv_activation,
+                                      activation_fn=tf.nn.relu,
                                       scope=f"tconv{i+1}_con")
-
-        if add_conv:
-            net = layers.conv2d(net, 1, 1, activation_fn=None, scope=f"conv{i+1}_con")
+        net = layers.conv2d(net, 1, 1, activation_fn=None, scope=f"conv{i+1}_con")
 
         contour_outputs.append(net)
     
     return segment_outputs, contour_outputs
 
 
-def upsample_bef(ds_layers, img_size, add_conv=False):
+def upsample(ds_layers, img_size):
     """
         Takes in a collection of downsampled layers, applies two transposed convolutions for each input layer returns
-        the results. A 1x1 convolution can be added after the upsample via parameter
+        the results. A 1x1 convolution is performed before the transposed convolution
         
         Returns the upsampled layers for segments and contours as separate arrays
         
@@ -251,7 +243,6 @@ def upsample_bef(ds_layers, img_size, add_conv=False):
 
         TODO: bilinear upsampling init? This would require a conv->tconv or tconv->conv where the tconv keeps the channels
         the same and the conv adjusts to the proper channels.
-        TODO: regularization? The dcan paper has L2 in the formula. What about dropout? Slim's resnet I believe has L2, need to check
     """
     
     segment_outputs = []
@@ -264,11 +255,9 @@ def upsample_bef(ds_layers, img_size, add_conv=False):
         tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
         tf.logging.info(f"Layer shape: {ds_layer.shape.as_list()}")
 
-        if add_conv:
-            net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_seg")
-        
         # Default xavier_initializer is used for the weights here.
         # TODO: this is uniform, should use gaussian per dcan paper?
+        net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_seg")
         net = layers.conv2d_transpose(net, 
                                       1, 
                                       kernel, 
@@ -279,9 +268,7 @@ def upsample_bef(ds_layers, img_size, add_conv=False):
 
         segment_outputs.append(net)
 
-        if add_conv:
-            net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_con")
-
+        net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_con")
         net = layers.conv2d_transpose(net,
                                       1, 
                                       kernel, 
@@ -305,14 +292,14 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
         raise ValueError("Image input must have equal dimensions")
 
     if ds_model == 'resnet50_v1':
-        ds_layers = build_resnet50_v1(input, is_training=is_training)
+        ds_layers = build_resnet50_v1(input, l2_weight_decay=l2_weight_decay, is_training=is_training)
     elif ds_model == 'custom':
-        ds_layers = build_custom(input, is_training=is_training)
+        ds_layers = build_custom(input, l2_weight_decay=l2_weight_decay, is_training=is_training)
 
-    with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose], 
+    with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose, layers.conv2d], 
                                                                 weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
 
-        segment_outputs, contour_outputs = upsample_bef(ds_layers, img_size, add_conv=True)
+        segment_outputs, contour_outputs = upsample(ds_layers, img_size)
         fuse_seg = tf.add_n(segment_outputs, name="fuse_seg")
         fuse_con = tf.add_n(contour_outputs, name="fuse_con")
 
