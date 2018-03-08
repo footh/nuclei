@@ -57,8 +57,62 @@ class BilinearInterp(init_ops.Initializer):
 
 bilinear_interp = BilinearInterp
 
+def custom_arg_scope(weight_decay=0.0001,
+                     batch_norm_decay=0.997,
+                     batch_norm_epsilon=1e-5,
+                     batch_norm_scale=True,
+                     activation_fn=tf.nn.relu,
+                     use_batch_norm=True):
+
+    batch_norm_params = {
+       'decay': batch_norm_decay,
+       'epsilon': batch_norm_epsilon,
+       'scale': batch_norm_scale,
+       'updates_collections': tf.GraphKeys.UPDATE_OPS,
+       'fused': None,  # Use fused batch norm if possible.
+    }
+    
+    with slim.arg_scope([slim.conv2d],
+                        weights_regularizer=slim.l2_regularizer(weight_decay),
+                        weights_initializer=slim.variance_scaling_initializer(),
+                        activation_fn=activation_fn,
+                        normalizer_fn=slim.batch_norm if use_batch_norm else None,
+                        normalizer_params=batch_norm_params):
+        with slim.arg_scope([slim.batch_norm], **batch_norm_params):
+            with slim.arg_scope([slim.max_pool2d], padding='SAME') as arg_sc:
+                return arg_sc    
+
+
 def build_custom(inputs, is_training=True):
-    pass
+    FEATURE_ROOT = 64
+    
+    blocks = []
+    with custom_arg_scope():
+        with slim.arg_scope([slim.batch_norm], is_training=is_training):
+            net = slim.conv2d(inputs, FEATURE_ROOT, (3, 3))
+            
+            net = slim.conv2d(net, FEATURE_ROOT * 2, (3, 3))
+            net = slim.max_pool2d(net, (2, 2), stride=(2, 2))
+
+            net = slim.conv2d(net, FEATURE_ROOT * 4, (3, 3))
+            net = slim.max_pool2d(net, (2, 2), stride=(2, 2))
+        
+            net = slim.conv2d(net, FEATURE_ROOT * 8, (3, 3))
+            net = slim.max_pool2d(net, (2, 2), stride=(2, 2))
+            
+            blocks.append(net)
+
+            net = slim.conv2d(net, FEATURE_ROOT * 16, (3, 3))
+            net = slim.max_pool2d(net, (2, 2), stride=(2, 2))
+
+            blocks.append(net)
+
+            net = slim.conv2d(net, FEATURE_ROOT * 32, (3, 3))
+            net = slim.max_pool2d(net, (2, 2), stride=(2, 2))
+            
+            blocks.append(net)
+    
+    return blocks
 
 
 def resnet_v1_50(inputs,
@@ -146,6 +200,7 @@ def upsample_aft(ds_layers, img_size, add_conv=False):
         kernel = 2 * factor - factor % 2
 
         tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
+        tf.logging.info(f"Layer shape: {ds_layer.shape.as_list()}")
 
         tconv_activation = None
         if add_conv:
@@ -205,6 +260,7 @@ def upsample_bef(ds_layers, img_size, add_conv=False):
         kernel = 2 * factor - factor % 2
 
         tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
+        tf.logging.info(f"Layer shape: {ds_layer.shape.as_list()}")
 
         if add_conv:
             net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_seg")
@@ -252,7 +308,7 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
     with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose], 
                                                                 weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
 
-        segment_outputs, contour_outputs = upsample_aft(ds_layers, img_size, add_conv=True)
+        segment_outputs, contour_outputs = upsample_bef(ds_layers, img_size, add_conv=True)
         fuse_seg = tf.add_n(segment_outputs, name="fuse_seg")
         fuse_con = tf.add_n(contour_outputs, name="fuse_con")
 
