@@ -293,7 +293,7 @@ def upsample_bef(ds_layers, img_size, add_conv=False):
     return segment_outputs, contour_outputs
 
 
-def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_weight_decay=0.0001):
+def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_weight_decay=0.01):
     """
         Returns the contour and segment logits based on the chosen downsample model. Defaults to 'resnet50_v1'
     """

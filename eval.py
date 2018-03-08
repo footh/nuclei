@@ -30,7 +30,7 @@ SIZE_MININUMS = {
 CON_MULT = 1.8
 SEG_THRESH = 0.2
 
-_DEBUG_ = True
+_DEBUG_ = False
 _DEBUG_WRITE_ = False
 tf.logging.set_verbosity(tf.logging.INFO)
 
@@ -160,7 +160,7 @@ def build_model(img_input):
 
 def size_boundaries(sizes):
     size_min = 10
-    size_max = 5000
+    size_max = 6000
     
     if len(sizes) > 4:
         sizes.sort()
@@ -293,8 +293,8 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
         spline_window = _spline_window(window_size)
 
     rle_results = []
-    for cnt in range(0, 1):
-    #for cnt in range(0, data_processor.mode_size(mode='test')):
+    #for cnt in range(0, 1):
+    for cnt in range(0, data_processor.mode_size(mode='test')):
         tf.logging.info(f"Evaluating file {cnt}")
         sample_tiles, sample_info = data_processor.batch_test(offset=cnt, overlap_const=OVERLAP_CONST)
         if _DEBUG_WRITE_:
