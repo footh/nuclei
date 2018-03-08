@@ -57,6 +57,7 @@ class BilinearInterp(init_ops.Initializer):
 
 bilinear_interp = BilinearInterp
 
+
 def custom_arg_scope(weight_decay=0.0001,
                      batch_norm_decay=0.997,
                      batch_norm_epsilon=1e-5,
@@ -84,30 +85,31 @@ def custom_arg_scope(weight_decay=0.0001,
 
 
 def build_custom(inputs, is_training=True):
-    FEATURE_ROOT = 64
+    tf.logging.info("CUSTOM")
+    feature_root = 64
     
     blocks = []
-    with custom_arg_scope():
+    with slim.arg_scope(custom_arg_scope()):
         with slim.arg_scope([slim.batch_norm], is_training=is_training):
-            net = slim.conv2d(inputs, FEATURE_ROOT, (3, 3))
+            net = slim.conv2d(inputs, feature_root, (3, 3))
             
-            net = slim.conv2d(net, FEATURE_ROOT * 2, (3, 3))
+            net = slim.conv2d(net, feature_root * 2, (3, 3))
             net = slim.max_pool2d(net, (2, 2), stride=(2, 2))
 
-            net = slim.conv2d(net, FEATURE_ROOT * 4, (3, 3))
+            net = slim.conv2d(net, feature_root * 4, (3, 3))
             net = slim.max_pool2d(net, (2, 2), stride=(2, 2))
         
-            net = slim.conv2d(net, FEATURE_ROOT * 8, (3, 3))
+            net = slim.conv2d(net, feature_root * 8, (3, 3))
             net = slim.max_pool2d(net, (2, 2), stride=(2, 2))
             
             blocks.append(net)
 
-            net = slim.conv2d(net, FEATURE_ROOT * 16, (3, 3))
+            net = slim.conv2d(net, feature_root * 16, (3, 3))
             net = slim.max_pool2d(net, (2, 2), stride=(2, 2))
 
             blocks.append(net)
 
-            net = slim.conv2d(net, FEATURE_ROOT * 32, (3, 3))
+            net = slim.conv2d(net, feature_root * 32, (3, 3))
             net = slim.max_pool2d(net, (2, 2), stride=(2, 2))
             
             blocks.append(net)
@@ -304,6 +306,8 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
 
     if ds_model == 'resnet50_v1':
         ds_layers = build_resnet50_v1(input, is_training=is_training)
+    elif ds_model == 'custom':
+        ds_layers = build_custom(input, is_training=is_training)
 
     with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose], 
                                                                 weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
