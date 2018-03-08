@@ -57,6 +57,9 @@ class BilinearInterp(init_ops.Initializer):
 
 bilinear_interp = BilinearInterp
 
+def build_custom(inputs, is_training=True):
+    pass
+
 
 def resnet_v1_50(inputs,
                  num_classes=None,
@@ -120,7 +123,7 @@ def build_resnet50_v2(img_input, is_training=True):
     return block2, block3, block4
 
 
-def upsample(ds_layers, img_size, add_conv=False):
+def upsample_aft(ds_layers, img_size, add_conv=False):
     """
         Takes in a collection of downsampled layers, applies two transposed convolutions for each input layer returns
         the results. A 1x1 convolution can be added after the upsample via parameter
@@ -179,6 +182,61 @@ def upsample(ds_layers, img_size, add_conv=False):
     return segment_outputs, contour_outputs
 
 
+def upsample_bef(ds_layers, img_size, add_conv=False):
+    """
+        Takes in a collection of downsampled layers, applies two transposed convolutions for each input layer returns
+        the results. A 1x1 convolution can be added after the upsample via parameter
+        
+        Returns the upsampled layers for segments and contours as separate arrays
+        
+        kernel size calculated per here:
+        http://warmspringwinds.github.io/tensorflow/tf-slim/2016/11/22/upsampling-and-image-segmentation-with-tensorflow-and-tf-slim/        
+
+        TODO: bilinear upsampling init? This would require a conv->tconv or tconv->conv where the tconv keeps the channels
+        the same and the conv adjusts to the proper channels.
+        TODO: regularization? The dcan paper has L2 in the formula. What about dropout? Slim's resnet I believe has L2, need to check
+    """
+    
+    segment_outputs = []
+    contour_outputs = []
+    
+    for i, ds_layer in enumerate(ds_layers):
+        factor = img_size // ds_layer.shape.as_list()[1]
+        kernel = 2 * factor - factor % 2
+
+        tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
+
+        if add_conv:
+            net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_seg")
+        
+        # Default xavier_initializer is used for the weights here.
+        # TODO: this is uniform, should use gaussian per dcan paper?
+        net = layers.conv2d_transpose(net, 
+                                      1, 
+                                      kernel, 
+                                      factor, 
+                                      padding='SAME', 
+                                      activation_fn=None,
+                                      scope=f"tconv{i+1}_seg")
+
+        segment_outputs.append(net)
+
+        if add_conv:
+            net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_con")
+
+        net = layers.conv2d_transpose(net,
+                                      1, 
+                                      kernel, 
+                                      factor,
+                                      padding='SAME', 
+                                      activation_fn=None,
+                                      scope=f"tconv{i+1}_con")
+
+        contour_outputs.append(net)
+    
+    return segment_outputs, contour_outputs
+
+
 def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_weight_decay=0.0001):
     """
         Returns the contour and segment logits based on the chosen downsample model. Defaults to 'resnet50_v1'
@@ -194,7 +252,7 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
     with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose], 
                                                                 weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
 
-        segment_outputs, contour_outputs = upsample(ds_layers, img_size, add_conv=True)
+        segment_outputs, contour_outputs = upsample_aft(ds_layers, img_size, add_conv=True)
         fuse_seg = tf.add_n(segment_outputs, name="fuse_seg")
         fuse_con = tf.add_n(contour_outputs, name="fuse_con")
 

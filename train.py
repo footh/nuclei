@@ -14,7 +14,7 @@ TRAINING_STEPS = [8000, 8000, 8000, 8000]
 # For discrete learning rates
 LEARNING_RATES = [0.002, 0.001, 0.0007, 0.0003]
 # For exponential decay learning rate based on valid loss progress
-VALID_LOSS_STREAK_MAX = 15
+VALID_LOSS_STREAK_MAX = 5
 EXPONENTIAL_DECAY_BASE = 0.8
 LEARNING_RATE_BASE = 0.001
 # For Adam optimizer

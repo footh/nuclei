@@ -63,3 +63,9 @@ Added 1x1x1 convolution layer after tconv :shrug:
 tensorboard --logdir=training-runs/bs5_resinit10/summary/train
 - At step 155, the IOU contour went from 0.000 to ~0.400, higher than the segment at the time. Weird.
 - Killed after 22K steps, val loss was going up for a while
+
+3/7:
+32000 steps, Adam 1e-4 epsilon, 0.001 base LR, 0.8 decay base, decay after 5
+Minor axis based contour lengths, No weights on loss
+Used 1 x 1 x depth convolution layer before tconv and removed the after one
+tensorboard --logdir=training-runs/bs5_resinit11/summary/train

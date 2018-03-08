@@ -9,13 +9,28 @@ from collections import OrderedDict
 from scipy import ndimage as ndi
 from skimage import morphology
 from skimage import filters
+from skimage import feature
 import datetime
 import os
 import csv
 
 OVERLAP_CONST = 2
 
-_DEBUG_ = False
+SIZE_MININUMS = {
+        100: 10,
+        200: 20,
+        300: 25,
+        400: 30,
+        500: 35,
+        600: 40,
+        800: 45,
+        10000: 50
+    }
+
+CON_MULT = 1.8
+SEG_THRESH = 0.2
+
+_DEBUG_ = True
 _DEBUG_WRITE_ = False
 tf.logging.set_verbosity(tf.logging.INFO)
 
@@ -79,7 +94,7 @@ def close_filter(img, rad=2, times=1):
 
 
 def open_filter(img, rad=2, times=1):
-    selem = morphology.disk(rad)
+    selem = morphology.square(rad)
     open_img = img
     for i in range(times):
         open_img = morphology.opening(open_img, selem)
@@ -143,6 +158,48 @@ def build_model(img_input):
     return pred_full
 
 
+def size_boundaries(sizes):
+    size_min = 10
+    size_max = 5000
+    
+    if len(sizes) > 4:
+        sizes.sort()
+        mean = np.mean(sizes[2:-2])
+        std = np.std(sizes[2:-2])
+    
+        for m, size in SIZE_MININUMS.items():
+            if mean < m:
+                size_min = size
+                break
+    
+    return size_min, size_max
+
+
+def split_labels(labels):
+    result = np.zeros(labels.shape)
+    cur_label = 1
+    for i in range(1, labels.max() + 1):
+        mask = (labels == i)
+        size = np.sum(mask)
+        print(f"size: {size}")
+        distance = ndi.distance_transform_edt(mask)
+        util.plot_compare(mask, distance, "mask", "distance")
+        #local_max = feature.peak_local_max(distance, indices=False, num_peaks=2, labels=mask)
+        lmc = feature.peak_local_max(distance, num_peaks=2, footprint=np.ones((15, 15)), labels=mask)
+        print(f"lmc: {lmc}")
+        local_max = np.zeros(labels.shape)
+        local_max[lmc[:,0], lmc[:,1]] = 1
+        print(f"local_max TOTAL: {np.sum(local_max)}")
+        label_max = morphology.label(local_max)
+        label_max_filled = morphology.watershed(-distance, label_max, mask=mask)
+        util.plot_compare(label_max, label_max_filled, "label_max", "label_max_filled")
+        for j in range(1, label_max_filled.max() + 1):
+            result[label_max_filled == j] = cur_label
+            cur_label += 1
+            
+    return result
+
+
 def post_process(result_seg, result_con):
     
     transforms_seg = OrderedDict()
@@ -160,19 +217,18 @@ def post_process(result_seg, result_con):
 #         util.plot_compare(thresh_con, labels_con, "thresh_con", "labels_con")
     
     #segments = np.logical_and(thresh_seg, np.logical_not(thresh_con))
-    # TODO: parameterize
-    segments = (result_seg - 1.8 * result_con) > 0.1
+    segments = (result_seg - CON_MULT * result_con) > SEG_THRESH
     if _DEBUG_:
         util.plot_compare(result_seg, result_con, "result_seg", "result_con")
         util.plot_compare(result_seg, segments, "result_seg", "segments")
         
-    #segments_cl = close_filter(segments)
-    #if _DEBUG_:
-    #    util.plot_compare(segments, segments_cl, "segments", "segments_cl")
-
-    labels = morphology.label(segments)
+    segments_cl = close_filter(segments)
     if _DEBUG_:
-        util.plot_compare(segments, label2rgb(labels, bg_label=0), "segments", "labels")
+        util.plot_compare(segments, segments_cl, "segments", "segments_cl")
+
+    labels = morphology.label(segments_cl)
+    if _DEBUG_:
+        util.plot_compare(segments_cl, label2rgb(labels, bg_label=0), "segments", "labels")
     
     distance_seg = ndi.distance_transform_edt(thresh_seg)
     
@@ -180,31 +236,40 @@ def post_process(result_seg, result_con):
     if _DEBUG_:
         util.plot_compare(label2rgb(labels, bg_label=0), label2rgb(result, bg_label=0), "labels", "result")
     tf.logging.info(f"Result label count: {result.max()}")
+
+    sizes = []
+    for i in range(1, result.max() + 1):
+        sizes.append(np.sum(result == i))
+        
+    size_min, size_max = size_boundaries(sizes)
+    tf.logging.info(f"Size boundaries (min, max): {size_min}, {size_max}")
     
     result_sized = np.zeros(result.shape, dtype=result.dtype)
     size_misses = 0
-    sizes = []
     for i in range(1, result.max() + 1):
-        # TODO: parameterize (maybe based on image size or average size of objects?)
         size = np.sum(result == i)
-        sizes.append(size)
-        if size > 10 and size < 6000:
+        if size > size_min and size < size_max:
             result_sized[result==i] = i - size_misses
         else:
             size_misses += 1
     
     if _DEBUG_:
         util.plot_compare(label2rgb(result, bg_label=0), label2rgb(result_sized, bg_label=0), "result", "result_sized")
-        util.plot_hist(sizes)
-    tf.logging.info(f"Shape: {result.shape}, size min: {min(sizes)}, size max: {max(sizes)}, size avg: {np.mean(sizes)}")
+        #util.plot_hist(sizes)
+    tf.logging.info(f"Shape: {result.shape}, Size data, min: {min(sizes)}, max: {max(sizes)}, avg: {np.mean(sizes):.4f}, std: {np.std(sizes):.4f}")
     tf.logging.info(f"Result label count (small labels removed): {result_sized.max()}")
 
-    # TODO: close the result? May help if holes are common but might not if it closes valid cracks
-    # TODO: may also consider a close on 'segments'. 1-pixel borders may not be valid divisions (contours tend to create much bigger separations)
-    # TODO: may also consider an open on 'segments'. I've seen some very thin connections that were invalid
-    # TODO: remove really small labels, on purple ones, there's a lot of salt that gets labelled and can cause a segment INSIDE a larger one
-    # Definitely should consider running an open to remove salt especially on purple ones see #0-8
-    # TODO: another fix for above is to do the watershed separation method (see valid #52)
+#     result_sized_split = split_labels(result_sized)
+#     if _DEBUG_:
+#         util.plot_compare(label2rgb(result_sized, bg_label=0), label2rgb(result_sized_split, bg_label=0), "result_sized", "result_sized_split")
+    
+
+    # **DONE** TODO: close the result? May help if holes are common but might not if it closes valid cracks
+    # **DONE** worked TODO: may also consider a close on 'segments'. 1-pixel borders may not be valid divisions (contours tend to create much bigger separations)
+    # **DONE** made worse TODO: may also consider an open on 'segments'. I've seen some very thin connections that were invalid
+    # **DONE** fixing spline helped TODO: remove really small labels, on purple ones, there's a lot of salt that gets labelled and can cause a segment INSIDE a larger one
+    # **DONE** fixing spline helped Definitely should consider running an open to remove salt especially on purple ones see #0-8
+    # **DONE** no vas TODO: another fix for above is to do the watershed separation method (see valid #52)
     # TODO: see clear_border method which removes dots near borders
     return result_sized
     
@@ -228,7 +293,8 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
         spline_window = _spline_window(window_size)
 
     rle_results = []
-    for cnt in range(0, data_processor.mode_size(mode='test')):
+    for cnt in range(0, 1):
+    #for cnt in range(0, data_processor.mode_size(mode='test')):
         tf.logging.info(f"Evaluating file {cnt}")
         sample_tiles, sample_info = data_processor.batch_test(offset=cnt, overlap_const=OVERLAP_CONST)
         if _DEBUG_WRITE_:
