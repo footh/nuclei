@@ -1,5 +1,7 @@
 import tensorflow as tf
 from tensorflow.contrib import slim
+from tensorflow.python.platform import gfile
+
 import numpy as np
 import os
 
@@ -17,6 +19,7 @@ LEARNING_RATES = [0.002, 0.001, 0.0007, 0.0003]
 VALID_LOSS_STREAK_MAX = 5
 EXPONENTIAL_DECAY_BASE = 0.8
 LEARNING_RATE_BASE = 0.001
+NEAR_LOSS_TOLERANCE = 0.005
 # For Adam optimizer
 ADAM_EPSILON = 1e-04
 # For Momentum optimizer
@@ -236,6 +239,7 @@ def train():
     best_valid_loss = 1000.
     valid_loss_streak = 0
     valid_loss_streak_hits = 0
+    near_valid_loss_step = None
     max_training_steps = np.sum(TRAINING_STEPS)
     for training_step in range(start_step, max_training_steps + 1):
         
@@ -299,6 +303,18 @@ def train():
                     valid_loss_streak_hits += 1
                     tf.logging.info(f"Valdation loss has not increased for {VALID_LOSS_STREAK_MAX} steps")
                     tf.logging.info(f"Decay exponent increased to {valid_loss_streak_hits}")
+
+                # Saving last epoch that is within the tolerance of the best loss
+                if valid_loss - best_valid_loss < NEAR_LOSS_TOLERANCE:
+                    if near_valid_loss_step is not None:
+                        search_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-*.ckpt-{near_valid_loss_step}.*")
+                        for f in gfile.Glob(search_path):
+                            tf.logging.info(f"Deleting checkpoint file: {f}")
+                            gfile.Remove(f)
+                    near_valid_loss_step = training_step
+                    checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}.ckpt")
+                    tf.logging.info(f"Saving near loss model to {checkpoint_path}-{training_step}")
+                    saver.save(sess, checkpoint_path, global_step=training_step)
 
             tf.logging.info(f"Best validation loss so far: {best_valid_loss:.5f}")
 

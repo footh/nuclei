@@ -302,7 +302,7 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
                             normalizer_fn=slim.batch_norm):
 
             with slim.arg_scope([slim.batch_norm], 
-                                scale=True, is_training=is_training)
+                                scale=True, is_training=is_training):
             
                 segment_outputs, contour_outputs = upsample(ds_layers, img_size, is_training=is_training)
                 fuse_seg = tf.add_n(segment_outputs, name="fuse_seg")
