@@ -20,13 +20,13 @@ nuclei kaggle challenge
 
 - Running in CloudML
 
-- Evaluation
+- **DONE** Evaluation
 
 - **DONE** Overlap-tile stitching or some other strategy to deal with image size differences
 
 - **DONE** Validation run does random cropping so it's not the same each time, should make more consistent (could choose the top/left when index is built?)
 
-- Freeze weights in resnet - see slim nets trainer for reference
+- **DONE** Yielded bad score - Freeze weights in resnet - see slim nets trainer for reference
 
 - **DONE** Didn't converge as well. Use custom downsample since resnet appears to converge quickly, it might be overkill
 
