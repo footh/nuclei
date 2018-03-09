@@ -296,7 +296,7 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
     elif ds_model == 'custom':
         ds_layers = build_custom(input, l2_weight_decay=l2_weight_decay, is_training=is_training)
 
-    with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose, layers.conv2d], 
+    with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose], 
                                                                 weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
 
         segment_outputs, contour_outputs = upsample(ds_layers, img_size)

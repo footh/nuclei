@@ -28,7 +28,7 @@ nuclei kaggle challenge
 
 - Freeze weights in resnet - see slim nets trainer for reference
 
-- Use custom downsample since resnet appears to converge quickly, it might be overkill
+- **DONE** Didn't converge as well. Use custom downsample since resnet appears to converge quickly, it might be overkill
 
 - **DONE** Better way to decay learning rate (see slim net code) 
   Conclusion: not sure if this should be done with ADAM optimizer. It would be easy to implement with tf.train.exponential_decay, but ADAM already does a form of exponential decay so the step version might be OK. 
@@ -40,10 +40,10 @@ nuclei kaggle challenge
 
 - See file on different class modalities. Should group batches in these modes to see how mode does in each one.
 
-- "Also when I'm selecting crops to feed to the net at training time, I arrange to give it crops that contain an 
+- **DONE** "Also when I'm selecting crops to feed to the net at training time, I arrange to give it crops that contain an 
 edge at least half the time." https://www.kaggle.com/c/data-science-bowl-2018/discussion/47690
 
-- http://scikit-image.org/docs/dev/auto_examples/segmentation/plot_watershed.html
+- **DONE** http://scikit-image.org/docs/dev/auto_examples/segmentation/plot_watershed.html
 
 - See here https://github.com/tensorlayer/tensorlayer/blob/master/tensorlayer/layers.py. An upsampling layer which 
 just uses tensorflow resize. Back prop flows through but are there learnable weights involved?

@@ -135,7 +135,20 @@ def _write_notes(train_dir):
 
 
 def _get_trainable_vars():
-    pass
+    """
+        Return list of variables to train, keys off command-line arg
+    """
+    if FLAGS.trainable_scopes is None:
+        return tf.trainable_variables()
+    else:
+        scopes = [scope.strip() for scope in FLAGS.trainable_scopes.split(',')]
+
+    print(scopes)
+    variables_to_train = []
+    for scope in scopes:
+        variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope)
+        variables_to_train.extend(variables)
+    return variables_to_train
 
 
 def train():
@@ -178,11 +191,14 @@ def train():
         iou_con = iou(logits_con, labels_con, scope='contour')
         tf.summary.scalar('contour_iou', iou_con)
 
+    trainable_vars = _get_trainable_vars()
+
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.name_scope('train'), tf.control_dependencies(update_ops):
 
         lr_input = tf.placeholder(tf.float32, [], name='learning_rate_input')
-        train_op = tf.train.AdamOptimizer(learning_rate=lr_input, epsilon=ADAM_EPSILON).minimize(total_loss)
+        train_op = tf.train.AdamOptimizer(learning_rate=lr_input, epsilon=ADAM_EPSILON).minimize(total_loss, 
+                                                                                                 var_list=trainable_vars)
         # train_op = tf.train.MomentumOptimizer(learning_rate=lr_input, momentum=MOMENTUM).minimize(total_loss)
 
     global_step = tf.train.get_or_create_global_step()
@@ -315,6 +331,10 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_boolean(
     'notes', False,
     'Add notes to to a file in training directory')
+
+tf.app.flags.DEFINE_string(
+    'trainable_scopes', None,
+    'Comma-separated list of scopes to set as variables to train. None means everything is trained')
 
 # ----------------------
 # Checkpoint parameters
