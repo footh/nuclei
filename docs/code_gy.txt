@@ -164,6 +164,18 @@ CONTOUR_DILATION = {
         1000: 8
     }
 -------------------------
+                # Saving last epoch that is within the tolerance of the best loss
+                if valid_loss - best_valid_loss < NEAR_LOSS_TOLERANCE:
+                    if near_valid_loss_step is not None:
+                        search_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-*.ckpt-{near_valid_loss_step}.*")
+                        for f in gfile.Glob(search_path):
+                            tf.logging.info(f"Deleting checkpoint file: {f}")
+                            gfile.Remove(f)
+                    near_valid_loss_step = training_step
+                    checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}.ckpt")
+                    tf.logging.info(f"Saving near loss model to {checkpoint_path}-{training_step}")
+                    saver.save(sess, checkpoint_path, global_step=training_step)
+
 -------------------------
 -------------------------
 -------------------------

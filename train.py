@@ -17,9 +17,9 @@ TRAINING_STEPS = [8000, 4000, 4000, 4000]
 LEARNING_RATES = [0.002, 0.001, 0.0007, 0.0003]
 # For exponential decay learning rate based on valid loss progress
 VALID_LOSS_STREAK_MAX = 5
-EXPONENTIAL_DECAY_BASE = 0.8
+EXPONENTIAL_DECAY_BASE = 0.9
 LEARNING_RATE_BASE = 0.001
-NEAR_LOSS_TOLERANCE = 0.005
+NEAR_LOSS_TOLERANCE = 0.0017
 # For Adam optimizer
 ADAM_EPSILON = 1e-04
 # For Momentum optimizer
@@ -38,6 +38,10 @@ def aux_loss(logits_seg_arr, logits_con_arr, labels_seg, labels_con, step):
         Derives auxiliary loss per DCAN paper for each upsampled output. Weighted based on step number but weights
         are just guesses based on the paper
     """
+    decay_base = 0.9
+    decay_interval = 100
+    weight = 0.9 ** (step // decay_interval)
+    
     segment_losses = []
     for i, logits in enumerate(logits_seg_arr):
         scope = f"aux_segment_{i}"
@@ -47,6 +51,10 @@ def aux_loss(logits_seg_arr, logits_con_arr, labels_seg, labels_con, step):
     for i, logits in enumerate(logits_con_arr):
         scope = f"aux_contour_{i}"
         contour_losses.append(tf.losses.sigmoid_cross_entropy(labels_con, logits, scope=scope))
+
+    loss_sum = tf.add(tf.add_n(segment_losses), tf.add_n(contour_losses), name='add_aux_loss')
+
+    return tf.scalar_mul(weight, loss_sum)
 
 
 def loss(logits_seg, logits_con, labels_seg, labels_con):
@@ -209,7 +217,9 @@ def train():
     
     # Global variable saver
     saver = tf.train.Saver()
-
+    # Near loss saver
+    nl_saver = tf.train.Saver(max_to_keep=1)
+    
     # Merge all the summaries and write them out to /tmp/retrain_logs (by default)
     merged_summaries = tf.summary.merge_all()
     train_writer = tf.summary.FileWriter(os.path.join(train_dir, 'summary', 'train'), sess.graph)
@@ -239,7 +249,6 @@ def train():
     best_valid_loss = 1000.
     valid_loss_streak = 0
     valid_loss_streak_hits = 0
-    near_valid_loss_step = None
     max_training_steps = np.sum(TRAINING_STEPS)
     for training_step in range(start_step, max_training_steps + 1):
         
@@ -306,15 +315,9 @@ def train():
 
                 # Saving last epoch that is within the tolerance of the best loss
                 if valid_loss - best_valid_loss < NEAR_LOSS_TOLERANCE:
-                    if near_valid_loss_step is not None:
-                        search_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-*.ckpt-{near_valid_loss_step}.*")
-                        for f in gfile.Glob(search_path):
-                            tf.logging.info(f"Deleting checkpoint file: {f}")
-                            gfile.Remove(f)
-                    near_valid_loss_step = training_step
                     checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}.ckpt")
                     tf.logging.info(f"Saving near loss model to {checkpoint_path}-{training_step}")
-                    saver.save(sess, checkpoint_path, global_step=training_step)
+                    nl_saver.save(sess, checkpoint_path, global_step=training_step)
 
             tf.logging.info(f"Best validation loss so far: {best_valid_loss:.5f}")
 

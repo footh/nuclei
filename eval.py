@@ -102,6 +102,13 @@ def open_filter(img, rad=2, times=1):
     return open_img
 
 
+def remove_small_objects(img, min_size=20):
+    return morphology.remove_small_objects(img, min_size=min_size)
+
+def remove_small_holes(img, min_size=20):
+    return morphology.remove_small_holes(img, min_size=min_size)
+
+
 def run_transforms(imga, transforms):
 
     transformed_image = np.copy(imga)
@@ -204,6 +211,8 @@ def post_process(result_seg, result_con):
     
     transforms_seg = OrderedDict()
     transforms_seg[threshold] = {}
+    #transforms_seg[remove_small_objects] = {}
+    #transforms_seg[remove_small_holes] = {}
 
     transforms_con = OrderedDict()
     transforms_con[threshold] = {}
