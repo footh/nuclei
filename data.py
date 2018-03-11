@@ -19,6 +19,7 @@ import hashlib
 import math
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
+from imgaug import augmenters as iaa
 
 IMG_EXT = 'png'
 IMG_CHANNELS = 3
@@ -478,6 +479,30 @@ class DataProcessor:
             sample_seg = sample_seg[:, ::-1]
             sample_con = sample_con[:, ::-1]
             tf.logging.debug(f"Mirrored on columns")
+
+        # Color augmentation
+        color_aug = iaa.Sometimes(0.5,
+                                  iaa.Sequential([
+                                      iaa.OneOf([
+                                          iaa.Sequential([
+                                              iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
+                                              iaa.WithChannels(0, iaa.Add((0, 100))),
+                                              iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB")]),
+                                          iaa.Sequential([
+                                              iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
+                                              iaa.WithChannels(1, iaa.Add((0, 100))),
+                                              iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB")]),
+                                          iaa.Sequential([
+                                              iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
+                                              iaa.WithChannels(2, iaa.Add((0, 100))),
+                                              iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB")]),
+                                          iaa.WithChannels(0, iaa.Add((0, 100))),
+                                          iaa.WithChannels(1, iaa.Add((0, 100))),
+                                          iaa.WithChannels(2, iaa.Add((0, 100)))
+                                      ])
+                                  ], random_order=True))
+
+        sample = color_aug.augment_image(sample)
 
         # TODO: distortion
         # TODO: brightness
