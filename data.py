@@ -357,6 +357,28 @@ class DataProcessor:
         if valid_same:
              self.valid_seeds = np.random.rand(self.mode_size(mode='valid'), 2)
 
+        # Color augmentation
+        self._color_aug = iaa.Sometimes(0.5,
+                                        iaa.Sequential([
+                                            iaa.OneOf([
+                                                iaa.Sequential([
+                                                    iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
+                                                    iaa.WithChannels(0, iaa.Add((0, 100))),
+                                                    iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB")]),
+                                                iaa.Sequential([
+                                                    iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
+                                                    iaa.WithChannels(1, iaa.Add((0, 100))),
+                                                    iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB")]),
+                                                iaa.Sequential([
+                                                    iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
+                                                    iaa.WithChannels(2, iaa.Add((0, 100))),
+                                                    iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB")]),
+                                                iaa.WithChannels(0, iaa.Add((0, 100))),
+                                                iaa.WithChannels(1, iaa.Add((0, 100))),
+                                                iaa.WithChannels(2, iaa.Add((0, 100)))
+                                            ])
+                                        ], random_order=True))
+
     def _generate_data_index(self):
         """
             Build the index of files, bucketed by source group
@@ -480,29 +502,7 @@ class DataProcessor:
             sample_con = sample_con[:, ::-1]
             tf.logging.debug(f"Mirrored on columns")
 
-        # Color augmentation
-        color_aug = iaa.Sometimes(0.5,
-                                  iaa.Sequential([
-                                      iaa.OneOf([
-                                          iaa.Sequential([
-                                              iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
-                                              iaa.WithChannels(0, iaa.Add((0, 100))),
-                                              iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB")]),
-                                          iaa.Sequential([
-                                              iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
-                                              iaa.WithChannels(1, iaa.Add((0, 100))),
-                                              iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB")]),
-                                          iaa.Sequential([
-                                              iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
-                                              iaa.WithChannels(2, iaa.Add((0, 100))),
-                                              iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB")]),
-                                          iaa.WithChannels(0, iaa.Add((0, 100))),
-                                          iaa.WithChannels(1, iaa.Add((0, 100))),
-                                          iaa.WithChannels(2, iaa.Add((0, 100)))
-                                      ])
-                                  ], random_order=True))
-
-        sample = color_aug.augment_image(sample)
+        sample = self._color_aug.augment_image(sample)
 
         # TODO: distortion
         # TODO: brightness
