@@ -31,15 +31,26 @@ IMG_SRC = 'src'
 IMG_CONTOUR = 'con'
 IMG_SEGMENT = 'seg'
 
+# CONTOUR_DILATION = {
+#         5: 2,
+#         10: 2,
+#         17: 3,
+#         22: 4,
+#         30: 5,
+#         42: 6,
+#         1000: 7
+#     }
+
 CONTOUR_DILATION = {
         5: 2,
-        10: 2,
-        17: 3,
-        22: 4,
-        30: 5,
-        42: 6,
-        1000: 7
+        10: 3,
+        17: 4,
+        22: 5,
+        30: 6,
+        42: 7,
+        1000: 8
     }
+
 
 CONTOUR_FREQ_RATIO = 0.008 # Ratio of positive contour labels that must be in a sample to be considered a hit
 CONTOUR_FREQ = 0.5 # Percentage of a batch that must contain contour label hits
@@ -469,6 +480,8 @@ class DataProcessor:
             tf.logging.debug(f"Mirrored on columns")
 
         # TODO: distortion
+        # TODO: brightness
+        # TODO: noise - see test set for example of noisy image (note: bright and purple ones appear more consistent re: noise
         return sample, sample_seg, sample_con
 
     def _labels(self, sample_id, pad_info):
