@@ -13,6 +13,14 @@ from skimage import feature
 import datetime
 import os
 import csv
+import sys
+
+# For debugging
+from PIL import Image
+from skimage.color import label2rgb
+from matplotlib import pyplot as plt
+from skimage import img_as_ubyte
+
 
 OVERLAP_CONST = 2
 
@@ -32,14 +40,18 @@ SEG_THRESH = 0.2
 
 _DEBUG_ = False
 _DEBUG_WRITE_ = False
-tf.logging.set_verbosity(tf.logging.INFO)
 
-if _DEBUG_:
-    from skimage.color import label2rgb
-    from matplotlib import pyplot as plt
-    
-if _DEBUG_WRITE_:
-    from skimage import img_as_ubyte
+
+def SET_DEBUG(val=False, write=False, path='eval'):
+
+    if write:
+        tf.gfile.MakeDirs(os.path.join('/tmp', 'nuclei', path))
+
+    sys.modules[__name__]._DEBUG_ = val
+    sys.modules[__name__]._DEBUG_WRITE_ = write
+
+    tf_setting = tf.logging.DEBUG if val else tf.logging.INFO
+    tf.logging.set_verbosity(tf_setting)
 
 
 # Run-length encoding taken from https://www.kaggle.com/rakhlin/fast-run-length-encoding-python
@@ -207,7 +219,7 @@ def split_labels(labels):
     return result
 
 
-def post_process(result_seg, result_con):
+def post_process(result_seg, result_con, sample_id=None):
     
     transforms_seg = OrderedDict()
     transforms_seg[threshold] = {}
@@ -272,7 +284,11 @@ def post_process(result_seg, result_con):
 #     if _DEBUG_:
 #         util.plot_compare(label2rgb(result_sized, bg_label=0), label2rgb(result_sized_split, bg_label=0), "result_sized", "result_sized_split")
     
-
+    if _DEBUG_WRITE_:
+        if sample_id is None: sample_id = 'result_sized'
+        d_img  = img_as_ubyte(label2rgb(result_sized, bg_label=0))
+        Image.fromarray(d_img).save(f"/tmp/nuclei/{FLAGS.debug_path}/{sample_id}.png")
+    
     # **DONE** TODO: close the result? May help if holes are common but might not if it closes valid cracks
     # **DONE** worked TODO: may also consider a close on 'segments'. 1-pixel borders may not be valid divisions (contours tend to create much bigger separations)
     # **DONE** made worse TODO: may also consider an open on 'segments'. I've seen some very thin connections that were invalid
@@ -281,9 +297,12 @@ def post_process(result_seg, result_con):
     # **DONE** no vas TODO: another fix for above is to do the watershed separation method (see valid #52)
     # TODO: see clear_border method which removes dots near borders
     return result_sized
-    
+
 
 def evaluate(trained_checkpoint, src='test', use_spline=True):
+    if FLAGS.debug_path is not None:
+        SET_DEBUG(False, True, FLAGS.debug_path)
+    
     # TODO: parameterize
     window_size = train.IMG_SIZE
     
@@ -365,7 +384,7 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
 
         # util._debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
 
-        result = post_process(result_seg, result_con)
+        result = post_process(result_seg, result_con, sample_id=sample_info['id'])
         
         for rle_label in rle_labels(result):
             rle_results.append([sample_info['id']] + [rle_label])
@@ -462,10 +481,6 @@ tf.app.flags.DEFINE_string(
     'trained_checkpoint', None,
     'The checkpoint to initialize evaluation from')
 
-# tf.app.flags.DEFINE_float(
-#     'pixel_threshold', 0.5,
-#     'The threshold above which a prediction is considered a positive pixel')
-
 tf.app.flags.DEFINE_string(
     'src', 'test',
     'The source directory to pull data from')
@@ -473,6 +488,10 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_string(
     'submission_file', None,
     'The name of the submission file to save (date will be automatically appended)')
+
+tf.app.flags.DEFINE_string(
+    'debug_path', None,
+    'Both turns on debugging and indicates the sub-directory under /tmp/nuclei to save debug files')
 
 
 FLAGS = tf.app.flags.FLAGS

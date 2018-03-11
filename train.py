@@ -302,7 +302,7 @@ def train():
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
                 valid_loss_streak = 0
-                checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}.ckpt")
+                checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}-s-{valid_iou_seg:.3f}-con-{valid_iou_con:.3f}.ckpt")
                 tf.logging.info(f"Saving best model to {checkpoint_path}-{training_step}")
                 saver.save(sess, checkpoint_path, global_step=training_step)
             else:
@@ -310,12 +310,12 @@ def train():
                 if valid_loss_streak >= VALID_LOSS_STREAK_MAX:
                     valid_loss_streak = 0
                     valid_loss_streak_hits += 1
-                    tf.logging.info(f"Valdation loss has not increased for {VALID_LOSS_STREAK_MAX} steps")
+                    tf.logging.info(f"Valdation loss has not improved for {VALID_LOSS_STREAK_MAX} steps")
                     tf.logging.info(f"Decay exponent increased to {valid_loss_streak_hits}")
 
                 # Saving last epoch that is within the tolerance of the best loss
                 if valid_loss - best_valid_loss < NEAR_LOSS_TOLERANCE:
-                    checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}.ckpt")
+                    checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}-s-{valid_iou_seg:.3f}-con-{valid_iou_con:.3f}.ckpt")
                     tf.logging.info(f"Saving near loss model to {checkpoint_path}-{training_step}")
                     nl_saver.save(sess, checkpoint_path, global_step=training_step)
 
