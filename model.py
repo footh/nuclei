@@ -139,9 +139,9 @@ def resnet_v1_50(inputs,
       inputs,
       blocks,
       num_classes,
-      is_training,
-      global_pool,
-      output_stride,
+      is_training=is_training,
+      global_pool=global_pool,
+      output_stride=output_stride,
       include_root_block=True,
       reuse=reuse,
       scope=scope)
@@ -164,6 +164,35 @@ def build_resnet50_v1(img_input, l2_weight_decay=0.01, is_training=True):
     return block1, block2, block3, block4
 
 
+def resnet_v2_50(inputs,
+                 num_classes=None,
+                 is_training=True,
+                 global_pool=True,
+                 output_stride=None,
+                 reuse=None,
+                 scope='resnet_v2_50'):
+    """
+        ResNet-50 model of [1]. See resnet_v2() for arg and return description.
+    """
+    blocks = [
+        resnet_v2.resnet_v2_block('block1', base_depth=64, num_units=3, stride=1),
+        resnet_v2.resnet_v2_block('block2', base_depth=128, num_units=4, stride=2),
+        resnet_v2.resnet_v2_block('block3', base_depth=256, num_units=6, stride=2),
+        resnet_v2.resnet_v2_block('block4', base_depth=512, num_units=3, stride=2),
+    ]
+
+    return resnet_v2.resnet_v2(
+        inputs,
+        blocks,
+        num_classes,
+        is_training=is_training,
+        global_pool=global_pool,
+        output_stride=output_stride,
+        include_root_block=True,
+        reuse=reuse,
+        scope=scope)
+
+
 def build_resnet50_v2(img_input, l2_weight_decay=0.01, is_training=True):
     """
         Builds resnet50_v2 model from slim
@@ -172,12 +201,13 @@ def build_resnet50_v2(img_input, l2_weight_decay=0.01, is_training=True):
     """
 
     with slim.arg_scope(resnet_v2.resnet_arg_scope(weight_decay=l2_weight_decay)):
-        block4, endpoints = resnet_v2.resnet_v2_50(img_input, is_training=is_training, global_pool=False)
+        block4, endpoints = resnet_v2_50(img_input, is_training=is_training, global_pool=False)
 
     block3 = endpoints['resnet_v2_50/block3']
     block2 = endpoints['resnet_v2_50/block2']
+    block1 = endpoints['resnet_v2_50/block1']
 
-    return block2, block3, block4
+    return block1, block2, block3, block4
 
 
 def upsample(ds_layers, img_size, type='seg'):
@@ -285,6 +315,8 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
     # Extract features from downsampling net
     if ds_model == 'resnet50_v1':
         ds_layers = build_resnet50_v1(input, l2_weight_decay=l2_weight_decay, is_training=is_training)
+    elif ds_model == 'resnet50_v2':
+        ds_layers = build_resnet50_v2(input, l2_weight_decay=l2_weight_decay, is_training=is_training)
     elif ds_model == 'custom':
         ds_layers = build_custom(input, l2_weight_decay=l2_weight_decay, is_training=is_training)
         
