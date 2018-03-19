@@ -177,8 +177,167 @@ CONTOUR_DILATION = {
                     saver.save(sess, checkpoint_path, global_step=training_step)
 
 -------------------------
+def upsample_aft(ds_layers, img_size):
+    """
+        Takes in a collection of downsampled layers, applies two transposed convolutions for each input layer returns
+        the results. A 1x1 convolution is added after the upsample
+        
+        Returns the upsampled layers for segments and contours as separate arrays
+        
+        kernel size calculated per here:
+        http://warmspringwinds.github.io/tensorflow/tf-slim/2016/11/22/upsampling-and-image-segmentation-with-tensorflow-and-tf-slim/        
+
+        TODO: bilinear upsampling init? This would require a conv->tconv or tconv->conv where the tconv keeps the channels
+        the same and the conv adjusts to the proper channels.
+        TODO: regularization? The dcan paper has L2 in the formula. What about dropout? Slim's resnet I believe has L2, need to check
+    """
+    
+    segment_outputs = []
+    contour_outputs = []
+    
+    for i, ds_layer in enumerate(ds_layers):
+        factor = img_size // ds_layer.shape.as_list()[1]
+        kernel = 2 * factor - factor % 2
+
+        tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
+        tf.logging.info(f"Layer shape: {ds_layer.shape.as_list()}")
+
+        # Default xavier_initializer is used for the weights here.
+        # TODO: this is uniform, should use gaussian per dcan paper?
+        net = layers.conv2d_transpose(ds_layer, 
+                                      1, 
+                                      kernel, 
+                                      factor, 
+                                      padding='SAME', 
+                                      activation_fn=tf.nn.relu,
+                                      scope=f"tconv{i+1}_seg")
+        net = layers.conv2d(net, 1, 1, activation_fn=None, scope=f"conv{i+1}_seg")
+
+        segment_outputs.append(net)
+
+        net = layers.conv2d_transpose(ds_layer,
+                                      1, 
+                                      kernel, 
+                                      factor,
+                                      padding='SAME', 
+                                      activation_fn=tf.nn.relu,
+                                      scope=f"tconv{i+1}_con")
+        net = layers.conv2d(net, 1, 1, activation_fn=None, scope=f"conv{i+1}_con")
+
+        contour_outputs.append(net)
+    
+    return segment_outputs, contour_outputs
+
 -------------------------
+def upsample_old(ds_layers, img_size):
+    """
+        Takes in a collection of downsampled layers, applies two transposed convolutions for each input layer returns
+        the results. A 1x1 convolution is performed before the transposed convolution
+        
+        Returns the upsampled layers for segments and contours as separate arrays
+        
+        kernel size calculated per here:
+        http://warmspringwinds.github.io/tensorflow/tf-slim/2016/11/22/upsampling-and-image-segmentation-with-tensorflow-and-tf-slim/        
+
+        TODO: bilinear upsampling init? This would require a conv->tconv or tconv->conv where the tconv keeps the channels
+        the same and the conv adjusts to the proper channels.
+    """
+    
+    segment_outputs = []
+    contour_outputs = []
+    
+    for i, ds_layer in enumerate(ds_layers):
+        factor = img_size // ds_layer.shape.as_list()[1]
+        kernel = 2 * factor - factor % 2
+
+        tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
+        tf.logging.info(f"Layer shape: {ds_layer.shape.as_list()}")
+
+        # Default xavier_initializer is used for the weights here.
+        # TODO: this is uniform, should use gaussian per dcan paper?
+        net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_seg")
+        net = layers.conv2d_transpose(net, 
+                                      1, 
+                                      kernel, 
+                                      factor, 
+                                      padding='SAME', 
+                                      activation_fn=None,
+                                      scope=f"tconv{i+1}_seg")
+
+        segment_outputs.append(net)
+
+        net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_con")
+        net = layers.conv2d_transpose(net,
+                                      1, 
+                                      kernel, 
+                                      factor,
+                                      padding='SAME', 
+                                      activation_fn=None,
+                                      scope=f"tconv{i+1}_con")
+
+        contour_outputs.append(net)
+    
+    return segment_outputs, contour_outputs
+
+
+def upsample2(seg_layers, con_layers, img_size):
+    """
+        Takes in a collection of downsampled layers, applies two transposed convolutions for each input layer returns
+        the results. A 1x1 convolution is performed before the transposed convolution
+        
+        Returns the upsampled layers for segments and contours as separate arrays
+        
+        kernel size calculated per here:
+        http://warmspringwinds.github.io/tensorflow/tf-slim/2016/11/22/upsampling-and-image-segmentation-with-tensorflow-and-tf-slim/        
+
+        TODO: bilinear upsampling init? This would require a conv->tconv or tconv->conv where the tconv keeps the channels
+        the same and the conv adjusts to the proper channels.
+    """
+    
+    segment_outputs = []
+    contour_outputs = []
+    
+    for i in range(len(seg_layers)):
+        # seg and con layers have the same shape so this is fine
+        factor = img_size // seg_layers[i].shape.as_list()[1]
+        kernel = 2 * factor - factor % 2
+
+        tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
+        tf.logging.info(f"Layer shape: {seg_layers[i].shape.as_list()}")
+
+        # Default xavier_initializer is used for the weights here.
+        # TODO: this is uniform, should use gaussian per dcan paper?
+        net = layers.conv2d(seg_layers[i], seg_layers[i].shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_seg")
+        net = layers.conv2d_transpose(net, 
+                                      1, 
+                                      kernel, 
+                                      factor, 
+                                      padding='SAME', 
+                                      activation_fn=None,
+                                      scope=f"tconv{i+1}_seg")
+
+        segment_outputs.append(net)
+
+        net = layers.conv2d(con_layers[i], con_layers[i].shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_con")
+        net = layers.conv2d_transpose(net,
+                                      1, 
+                                      kernel, 
+                                      factor,
+                                      padding='SAME', 
+                                      activation_fn=None,
+                                      scope=f"tconv{i+1}_con")
+
+        contour_outputs.append(net)
+    
+    return segment_outputs, contour_outputs
+
 -------------------------
+    if learn_color:
+        with tf.variable_scope(f"{scope}/learn_color"), slim.arg_scope([layers.conv2d],
+                                                                       weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
+            input = layers.conv2d(input, 10, 1, padding='VALID', scope=f"conv1")
+            input = layers.conv2d(input, 3, 1, padding='VALID', scope=f"conv2")
+
 -------------------------
 -------------------------
 -------------------------

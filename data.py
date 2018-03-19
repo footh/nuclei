@@ -52,6 +52,16 @@ CONTOUR_DILATION = {
         1000: 8
     }
 
+# CONTOUR_DILATION = {
+#         5: 1,
+#         10: 2,
+#         17: 2,
+#         22: 3,
+#         30: 4,
+#         42: 5,
+#         1000: 6
+#     }
+
 
 CONTOUR_FREQ_RATIO = 0.008 # Ratio of positive contour labels that must be in a sample to be considered a hit
 CONTOUR_FREQ = 0.5 # Percentage of a batch that must contain contour label hits

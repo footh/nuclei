@@ -16,9 +16,9 @@ TRAINING_STEPS = [8000, 4000, 4000, 4000]
 # For discrete learning rates
 LEARNING_RATES = [0.002, 0.001, 0.0007, 0.0003]
 # For exponential decay learning rate based on valid loss progress
-VALID_LOSS_STREAK_MAX = 5
-EXPONENTIAL_DECAY_BASE = 0.9
-LEARNING_RATE_BASE = 0.001
+VALID_LOSS_STREAK_MAX = 6
+EXPONENTIAL_DECAY_BASE = 0.8
+LEARNING_RATE_BASE = 0.01
 NEAR_LOSS_TOLERANCE = 0.0017
 # For Adam optimizer
 ADAM_EPSILON = 1e-04
@@ -26,9 +26,9 @@ ADAM_EPSILON = 1e-04
 MOMENTUM = 0.8
 
 VALIDATION_PCT = 15
-VAL_INTERVAL = 300
+VAL_INTERVAL = 100
 TRAIN_BASE_DIR = 'training-runs'
-L2_WEIGHT_DECAY = 0.01
+L2_WEIGHT_DECAY = 0.0001
 # SEG_RATIO = 0.13405
 # CON_RATIO = 0.04466
 
@@ -145,20 +145,21 @@ def _write_notes(train_dir):
             f.write(response)
 
 
-def _get_trainable_vars():
+def _get_trainable_vars(scope_list=None):
     """
-        Return list of variables to train, keys off command-line arg
+        Return list of variables to train, argument is comma-delimited list of scopes to train. Padding None trains all.
     """
-    if FLAGS.trainable_scopes is None:
+    if scope_list is None:
         return tf.trainable_variables()
     else:
-        scopes = [scope.strip() for scope in FLAGS.trainable_scopes.split(',')]
+        scopes = [scope.strip() for scope in scope_list.split(',')]
 
-    print(scopes)
     variables_to_train = []
     for scope in scopes:
         variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope)
         variables_to_train.extend(variables)
+        
+    tf.logging.info(f"Training {len(variables_to_train)} variables..")
     return variables_to_train
 
 
@@ -202,7 +203,7 @@ def train():
         iou_con = iou(logits_con, labels_con, scope='contour')
         tf.summary.scalar('contour_iou', iou_con)
 
-    trainable_vars = _get_trainable_vars()
+    trainable_vars = _get_trainable_vars(FLAGS.trainable_scopes)
 
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.name_scope('train'), tf.control_dependencies(update_ops):
@@ -210,7 +211,8 @@ def train():
         lr_input = tf.placeholder(tf.float32, [], name='learning_rate_input')
         train_op = tf.train.AdamOptimizer(learning_rate=lr_input, epsilon=ADAM_EPSILON).minimize(total_loss, 
                                                                                                  var_list=trainable_vars)
-        # train_op = tf.train.MomentumOptimizer(learning_rate=lr_input, momentum=MOMENTUM).minimize(total_loss)
+#         train_op = tf.train.MomentumOptimizer(learning_rate=lr_input, momentum=MOMENTUM).minimize(total_loss,
+#                                                                                                   var_list=trainable_vars)
 
     global_step = tf.train.get_or_create_global_step()
     increment_global_step = tf.assign(global_step, global_step + 1)

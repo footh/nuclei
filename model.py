@@ -159,8 +159,9 @@ def build_resnet50_v1(img_input, l2_weight_decay=0.01, is_training=True):
 
     block3 = endpoints['resnet_v1_50/block3']
     block2 = endpoints['resnet_v1_50/block2']
+    block1 = endpoints['resnet_v1_50/block1']
     
-    return block2, block3, block4
+    return block1, block2, block3, block4
 
 
 def build_resnet50_v2(img_input, l2_weight_decay=0.01, is_training=True):
@@ -179,64 +180,12 @@ def build_resnet50_v2(img_input, l2_weight_decay=0.01, is_training=True):
     return block2, block3, block4
 
 
-def upsample_aft(ds_layers, img_size):
+def upsample(ds_layers, img_size, type='seg'):
     """
-        Takes in a collection of downsampled layers, applies two transposed convolutions for each input layer returns
-        the results. A 1x1 convolution is added after the upsample
-        
-        Returns the upsampled layers for segments and contours as separate arrays
-        
-        kernel size calculated per here:
-        http://warmspringwinds.github.io/tensorflow/tf-slim/2016/11/22/upsampling-and-image-segmentation-with-tensorflow-and-tf-slim/        
-
-        TODO: bilinear upsampling init? This would require a conv->tconv or tconv->conv where the tconv keeps the channels
-        the same and the conv adjusts to the proper channels.
-        TODO: regularization? The dcan paper has L2 in the formula. What about dropout? Slim's resnet I believe has L2, need to check
-    """
-    
-    segment_outputs = []
-    contour_outputs = []
-    
-    for i, ds_layer in enumerate(ds_layers):
-        factor = img_size // ds_layer.shape.as_list()[1]
-        kernel = 2 * factor - factor % 2
-
-        tf.logging.debug(f"layer {i+1} kernel, stride (factor): {kernel, factor}")
-        tf.logging.info(f"Layer shape: {ds_layer.shape.as_list()}")
-
-        # Default xavier_initializer is used for the weights here.
-        # TODO: this is uniform, should use gaussian per dcan paper?
-        net = layers.conv2d_transpose(ds_layer, 
-                                      1, 
-                                      kernel, 
-                                      factor, 
-                                      padding='SAME', 
-                                      activation_fn=tf.nn.relu,
-                                      scope=f"tconv{i+1}_seg")
-        net = layers.conv2d(net, 1, 1, activation_fn=None, scope=f"conv{i+1}_seg")
-
-        segment_outputs.append(net)
-
-        net = layers.conv2d_transpose(ds_layer,
-                                      1, 
-                                      kernel, 
-                                      factor,
-                                      padding='SAME', 
-                                      activation_fn=tf.nn.relu,
-                                      scope=f"tconv{i+1}_con")
-        net = layers.conv2d(net, 1, 1, activation_fn=None, scope=f"conv{i+1}_con")
-
-        contour_outputs.append(net)
-    
-    return segment_outputs, contour_outputs
-
-
-def upsample(ds_layers, img_size):
-    """
-        Takes in a collection of downsampled layers, applies two transposed convolutions for each input layer returns
+        Takes in a collection of downsampled layers, applies  transposed convolutions for each input layer returns
         the results. A 1x1 convolution is performed before the transposed convolution
         
-        Returns the upsampled layers for segments and contours as separate arrays
+        Returns the upsampled layers as an array
         
         kernel size calculated per here:
         http://warmspringwinds.github.io/tensorflow/tf-slim/2016/11/22/upsampling-and-image-segmentation-with-tensorflow-and-tf-slim/        
@@ -244,9 +193,7 @@ def upsample(ds_layers, img_size):
         TODO: bilinear upsampling init? This would require a conv->tconv or tconv->conv where the tconv keeps the channels
         the same and the conv adjusts to the proper channels.
     """
-    
-    segment_outputs = []
-    contour_outputs = []
+    upsampled_outputs = []
     
     for i, ds_layer in enumerate(ds_layers):
         factor = img_size // ds_layer.shape.as_list()[1]
@@ -257,29 +204,73 @@ def upsample(ds_layers, img_size):
 
         # Default xavier_initializer is used for the weights here.
         # TODO: this is uniform, should use gaussian per dcan paper?
-        net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_seg")
+        net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_{type}")
         net = layers.conv2d_transpose(net, 
                                       1, 
                                       kernel, 
                                       factor, 
                                       padding='SAME', 
                                       activation_fn=None,
-                                      scope=f"tconv{i+1}_seg")
+                                      scope=f"tconv{i+1}_{type}")
 
-        segment_outputs.append(net)
-
-        net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_con")
-        net = layers.conv2d_transpose(net,
-                                      1, 
-                                      kernel, 
-                                      factor,
-                                      padding='SAME', 
-                                      activation_fn=None,
-                                      scope=f"tconv{i+1}_con")
-
-        contour_outputs.append(net)
+        upsampled_outputs.append(net)
     
-    return segment_outputs, contour_outputs
+    return upsampled_outputs   
+
+
+def process_ds_layers(ds_layers, channels_out=256, type='seg'):
+    """
+        Process the downsample layers by running a convolution to get to desired output channels and upsampling each
+        deeper layer to fuse with layer right above. Fused layers get a final 3x3 convolution.
+    """
+    ds_layers_out = []
+            
+    # NOTE: default activation for conv2d is tf.nn.relu
+    # NOTE: default uniform xavier_initializer is used for the weights here.
+    index = len(ds_layers) - 1
+    while index >= 0:
+        tf.logging.info(ds_layers[index].shape.as_list())
+        net = layers.conv2d(ds_layers[index], channels_out, 1, padding='VALID', scope=f"{type}_conv{index+1}")
+        if len(ds_layers_out) > 0:
+            up_layer = ds_layers_out[-1]
+            up_size = [2 * l for l in up_layer.shape.as_list()[1:3]]
+            up = tf.image.resize_images(up_layer, up_size, tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+            
+            net = tf.add(net, up, name=f"{type}_fuse{index+1}")
+            net = layers.conv2d(net, channels_out, 3, scope=f"{type}_fuseconv{index+1}")
+        
+        ds_layers_out.append(net)
+        index -= 1
+
+    return ds_layers_out[::-1]
+
+
+def attention_ds_layers(ds_layers):
+    
+    seg_layers = []
+    con_layers = []
+    for i, ds_layer in enumerate(ds_layers):
+        avg = slim.layers.avg_pool2d(ds_layer, ds_layer.shape.as_list()[1:3], stride=1, scope="avg_pool")
+        avg = tf.squeeze(avg, axis=(1,2))
+        tf.logging.info(f"avg pool shape: {avg.shape.as_list()}")
+        
+        attn_seg = tf.layers.dense(avg, avg.shape.as_list()[-1], kernel_initializer=slim.xavier_initializer(), name=f"seg_weights{i+1}")
+        attn_seg = tf.expand_dims(attn_seg, 1)
+        attn_seg = tf.expand_dims(attn_seg, 1)
+        tf.logging.info(f"attn_seg weights shape: {attn_seg.shape.as_list()}")
+        attn_seg = tf.multiply(ds_layer, attn_seg, name=f"seg_weighted{i+1}")
+        tf.logging.info(f"attn seg out shape: {attn_seg.shape.as_list()}")
+        seg_layers.append(attn_seg)
+        
+        attn_con = tf.layers.dense(avg, avg.shape.as_list()[-1], kernel_initializer=slim.xavier_initializer(), name=f"con_weights{i+1}")
+        attn_con = tf.expand_dims(attn_con, 1)
+        attn_con = tf.expand_dims(attn_con, 1)
+        tf.logging.info(f"attn con weights shape: {attn_con.shape.as_list()}")
+        attn_con = tf.multiply(ds_layer, attn_con, name=f"con_weighted{i+1}")
+        tf.logging.info(f"attn con out shape: {attn_con.shape.as_list()}")
+        con_layers.append(attn_con)
+        
+    return seg_layers, con_layers
 
 
 def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_weight_decay=0.01):
@@ -291,21 +282,32 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
     if img_size != input.shape.as_list()[2]:
         raise ValueError("Image input must have equal dimensions")
 
+    # Extract features from downsampling net
     if ds_model == 'resnet50_v1':
         ds_layers = build_resnet50_v1(input, l2_weight_decay=l2_weight_decay, is_training=is_training)
     elif ds_model == 'custom':
         ds_layers = build_custom(input, l2_weight_decay=l2_weight_decay, is_training=is_training)
+        
+#     # Add attention to each downsampled layer for both segments and contours
+#     with tf.variable_scope(f"{scope}/attn"):
+#         seg_layers, con_layers = attention_ds_layers(ds_layers)
 
+    # Process extracted downsampled layers
+    with tf.variable_scope(f"{scope}/process_ds"), slim.arg_scope([layers.conv2d],
+                                                                  weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
+        #ds_layers = process_ds_layers(ds_layers)
+        seg_layers = process_ds_layers(ds_layers, type='seg')
+        con_layers = process_ds_layers(ds_layers, type='con')
+
+    # Upsample to image size the processed ds layers to segment and contour results
     with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose], 
                                                                 weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
-#         with slim.arg_scope([layers.conv2d], 
-#                             normalizer_fn=slim.batch_norm):
-# 
-#             with slim.arg_scope([slim.batch_norm], 
-#                                 scale=True, is_training=is_training):
+        # segment_outputs, contour_outputs = upsample(ds_layers, img_size)
+        segment_outputs = upsample(seg_layers, img_size, type='seg')
+        contour_outputs = upsample(con_layers, img_size, type='con')
 
-        segment_outputs, contour_outputs = upsample(ds_layers, img_size)
-        fuse_seg = tf.add_n(segment_outputs, name="fuse_seg")
-        fuse_con = tf.add_n(contour_outputs, name="fuse_con")
+    # Fuse the segment and contour results
+    fuse_seg = tf.add_n(segment_outputs, name="fuse_seg")
+    fuse_con = tf.add_n(contour_outputs, name="fuse_con")
 
     return fuse_seg, fuse_con
