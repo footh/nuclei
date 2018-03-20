@@ -7,6 +7,7 @@ import numpy as np
 import scipy
 from collections import OrderedDict
 from scipy import ndimage as ndi
+import skimage
 from skimage import morphology
 from skimage import filters
 from skimage import feature
@@ -36,7 +37,7 @@ SIZE_MININUMS = {
     }
 
 CON_MULT = 1.8
-SEG_THRESH = 0.2
+SEG_THRESH = 0.4
 
 _DEBUG_ = False
 _DEBUG_WRITE_ = False
@@ -117,8 +118,26 @@ def open_filter(img, rad=2, times=1):
 def remove_small_objects(img, min_size=20):
     return morphology.remove_small_objects(img, min_size=min_size)
 
+
 def remove_small_holes(img, min_size=20):
     return morphology.remove_small_holes(img, min_size=min_size)
+
+
+def frangi_filter(img, scale_range=(0, 5), scale_step=0.25):
+    return filters.frangi(img, scale_range=scale_range, scale_step=scale_step)
+
+
+def hessian_filter(img):
+    return filters.hessian(img)
+
+
+def invert(img):
+    return skimage.util.invert(img)
+
+
+def erode(img, rad=2):
+    selem = morphology.square(rad)
+    return morphology.erosion(img, selem)
 
 
 def run_transforms(imga, transforms):
@@ -227,18 +246,22 @@ def post_process(result_seg, result_con, sample_id=None):
     #transforms_seg[remove_small_holes] = {}
 
     transforms_con = OrderedDict()
-    transforms_con[threshold] = {}
-    #transforms_con[open_filter] = {}
+    transforms_con[invert] = {}
+    transforms_con[frangi_filter] = {}
+    # transforms_con[threshold] = {'method': 'li'}
     
     thresh_seg = run_transforms(result_seg, transforms_seg)
-    #thresh_con = run_transforms(result_con, transforms_con)
     
-#     labels_con = morphology.label(thresh_con)
-#     if _DEBUG_:
-#         util.plot_compare(thresh_con, labels_con, "thresh_con", "labels_con")
+    #np.save('/tmp/nuclei/con.npy', result_con)
+    trans_con = run_transforms(result_con, transforms_con)
+    trans_con = trans_con / np.max(trans_con)
+    trans_con = scipy.stats.gmean(np.dstack((result_con, trans_con)), axis=2)
+    if _DEBUG_:
+        util.plot_compare(result_con, trans_con, "result_con", "trans_con")
     
-    #segments = np.logical_and(thresh_seg, np.logical_not(thresh_con))
-    segments = (result_seg - CON_MULT * result_con) > SEG_THRESH
+    #segments = np.logical_and(thresh_seg, np.logical_not(trans_con))
+    #segments = (result_seg - CON_MULT * result_con) > SEG_THRESH
+    segments = (result_seg - CON_MULT * trans_con) > SEG_THRESH
     if _DEBUG_:
         util.plot_compare(result_seg, result_con, "result_seg", "result_con")
         util.plot_compare(result_seg, segments, "result_seg", "segments")
@@ -301,7 +324,7 @@ def post_process(result_seg, result_con, sample_id=None):
 
 def evaluate(trained_checkpoint, src='test', use_spline=True):
     if FLAGS.debug_path is not None:
-        SET_DEBUG(False, True, FLAGS.debug_path)
+        SET_DEBUG(True, True, FLAGS.debug_path)
     
     # TODO: parameterize
     window_size = train.IMG_SIZE
@@ -323,10 +346,10 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
     rle_results = []
     #for cnt in range(0, 1):
     for cnt in range(0, data_processor.mode_size(mode='test')):
-        tf.logging.info(f"Evaluating file {cnt}")
         sample_tiles, sample_info = data_processor.batch_test(offset=cnt, overlap_const=OVERLAP_CONST)
         if _DEBUG_WRITE_:
             data_processor.copy_id(sample_info['id'], src='debug')
+        tf.logging.info(f"Evaluating file {cnt}, id: {sample_info['id']}")
     
         # Prediction --------------------------------
         tile_rows, tile_cols = sample_tiles.shape[0:2]

@@ -512,7 +512,7 @@ class DataProcessor:
             sample_con = sample_con[:, ::-1]
             tf.logging.debug(f"Mirrored on columns")
 
-        sample = self._color_aug.augment_image(sample)
+        #sample = self._color_aug.augment_image(sample)
 
         # TODO: distortion
         # TODO: brightness
