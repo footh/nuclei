@@ -81,7 +81,7 @@ def loss(logits_seg, logits_con, labels_seg, labels_con):
     loss_seg = tf.losses.sigmoid_cross_entropy(labels_seg, logits_seg, scope='segment_loss')
     loss_con = tf.losses.sigmoid_cross_entropy(labels_con, logits_con, scope='contour_loss')
 
-    total_loss = tf.add(loss_seg, loss_con, name='total_loss')
+    total_loss = tf.add(tf.scalar_mul(1.0, loss_seg), tf.scalar_mul(1.0, loss_con), name='total_loss')
     
     return total_loss
 
@@ -304,7 +304,7 @@ def train():
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
                 valid_loss_streak = 0
-                checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}-s-{valid_iou_seg:.3f}-con-{valid_iou_con:.3f}.ckpt")
+                checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}-s-{valid_iou_seg:.3f}-c-{valid_iou_con:.3f}.ckpt")
                 tf.logging.info(f"Saving best model to {checkpoint_path}-{training_step}")
                 saver.save(sess, checkpoint_path, global_step=training_step)
             else:
@@ -317,7 +317,7 @@ def train():
 
                 # Saving last epoch that is within the tolerance of the best loss
                 if valid_loss - best_valid_loss < NEAR_LOSS_TOLERANCE:
-                    checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}-s-{valid_iou_seg:.3f}-con-{valid_iou_con:.3f}.ckpt")
+                    checkpoint_path = os.path.join(train_dir, 'best', f"{MODEL_SCOPE}_vloss-{valid_loss:.5f}-s-{valid_iou_seg:.3f}-c-{valid_iou_con:.3f}.ckpt")
                     tf.logging.info(f"Saving near loss model to {checkpoint_path}-{training_step}")
                     nl_saver.save(sess, checkpoint_path, global_step=training_step)
 

@@ -25,16 +25,29 @@ from skimage import img_as_ubyte
 
 OVERLAP_CONST = 2
 
+# SIZE_MININUMS = {
+#         100: 10,
+#         200: 20,
+#         300: 25,
+#         400: 30,
+#         500: 35,
+#         600: 40,
+#         800: 45,
+#         10000: 50
+#     }
+
 SIZE_MININUMS = {
         100: 10,
         200: 20,
-        300: 25,
-        400: 30,
-        500: 35,
-        600: 40,
-        800: 45,
-        10000: 50
+        300: 30,
+        400: 40,
+        500: 50,
+        600: 60,
+        800: 70,
+        10000: 80
     }
+
+SIZE_MAX_MEAN_MULT = 6
 
 CON_MULT = 1.8
 SEG_THRESH = 0.4
@@ -197,18 +210,25 @@ def build_model(img_input):
 
 
 def size_boundaries(sizes):
-    size_min = 10
-    size_max = 6000
-    
-    if len(sizes) > 4:
-        sizes.sort()
-        mean = np.mean(sizes[2:-2])
-        std = np.std(sizes[2:-2])
-    
-        for m, size in SIZE_MININUMS.items():
-            if mean < m:
-                size_min = size
-                break
+
+    sizes.sort()
+    mean = np.mean(sizes)
+    std = np.std(sizes)
+#     if len(sizes) > 4:
+#         mean = np.mean(sizes[2:-2])
+#         std = np.std(sizes[2:-2])
+#     else:
+#         mean = np.mean(sizes)
+#         std = np.std(sizes)
+        
+    tf.logging.debug(f"size mean, std used in size_boundaries: {mean}, {std}")
+
+    for m, size in SIZE_MININUMS.items():
+        if mean < m:
+            size_min = size
+            break
+
+    size_max = int(SIZE_MAX_MEAN_MULT * mean)
     
     return size_min, size_max
 
@@ -266,7 +286,8 @@ def post_process(result_seg, result_con, sample_id=None):
         util.plot_compare(result_seg, result_con, "result_seg", "result_con")
         util.plot_compare(result_seg, segments, "result_seg", "segments")
         
-    segments_cl = close_filter(segments)
+    #segments_cl = close_filter(segments)
+    segments_cl = segments
     if _DEBUG_:
         util.plot_compare(segments, segments_cl, "segments", "segments_cl")
 

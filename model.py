@@ -6,6 +6,7 @@ from tensorflow.contrib import layers
 from tensorflow.python.ops import init_ops
 
 import numpy as np
+from mpmath import residual
 
 DROPOUT_PROB = 0.5
 
@@ -235,9 +236,9 @@ def upsample(ds_layers, img_size, type='seg'):
 
         # Default xavier_initializer is used for the weights here.
         # TODO: this is uniform, should use gaussian per dcan paper?
-        net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_{type}")
-        net = layers.conv2d(net, net.shape.as_list()[-1], 3, activation_fn=tf.nn.relu, scope=f"convb{i+1}_{type}")
-        net = layers.conv2d_transpose(net, 
+        #net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 1, activation_fn=tf.nn.relu, scope=f"conv{i+1}_{type}")
+        #net = layers.conv2d(net, net.shape.as_list()[-1], 3, activation_fn=tf.nn.relu, scope=f"convb{i+1}_{type}")
+        net = layers.conv2d_transpose(ds_layer, 
                                       1, 
                                       kernel, 
                                       factor, 
@@ -249,6 +250,20 @@ def upsample(ds_layers, img_size, type='seg'):
     
     return upsampled_outputs   
 
+def residual_ds_layers(ds_layers, type='seg'):
+    """
+        Perform a residual block on each incoming downsampled layer
+    """
+    residual_output = []
+    
+    for i, ds_layer in enumerate(ds_layers):
+        net = layers.conv2d(ds_layer, ds_layer.shape.as_list()[-1], 3, activation_fn=tf.nn.relu, scope=f"conv_a{i+1}_{type}")
+        net = layers.conv2d(net, net.shape.as_list()[-1], 3, activation_fn=tf.nn.relu, scope=f"conv_b{i+1}_{type}")
+        
+        net = tf.nn.relu(tf.add(ds_layer, net, name=f"fuse_{type}"))
+        residual_output.append(net)
+
+    return residual_output
 
 def process_ds_layers(ds_layers, channels_out=256, type='seg'):
     """
@@ -333,13 +348,21 @@ def logits(input, ds_model='resnet50_v1', scope='dcan', is_training=True, l2_wei
         #seg_layers = process_ds_layers(ds_layers, type='seg')
         #con_layers = process_ds_layers(ds_layers, type='con')
 
+    with tf.variable_scope(f"{scope}/residual_ds"), slim.arg_scope([layers.conv2d],
+                                                                   weights_regularizer=slim.l2_regularizer(l2_weight_decay),
+                                                                   normalizer_fn=None):
+        #with slim.arg_scope([slim.batch_norm], is_training=is_training, scale=True):
+        seg_layers = residual_ds_layers(ds_layers, type='seg')
+        con_layers = residual_ds_layers(ds_layers, type='con')
+
+
     # Upsample to image size the processed ds layers to segment and contour results
     with tf.variable_scope(f"{scope}/upsample"), slim.arg_scope([layers.conv2d_transpose], 
                                                                 weights_regularizer=slim.l2_regularizer(l2_weight_decay)):
-        #segment_outputs = upsample(seg_layers, img_size, type='seg')
-        #contour_outputs = upsample(con_layers, img_size, type='con')
-        segment_outputs = upsample(ds_layers, img_size, type='seg')
-        contour_outputs = upsample(ds_layers, img_size, type='con')
+        segment_outputs = upsample(seg_layers, img_size, type='seg')
+        contour_outputs = upsample(con_layers, img_size, type='con')
+        #segment_outputs = upsample(ds_layers, img_size, type='seg')
+        #contour_outputs = upsample(ds_layers, img_size, type='con')
 
     # Fuse the segment and contour results
     fuse_seg = tf.add_n(segment_outputs, name="fuse_seg")
