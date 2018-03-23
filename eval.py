@@ -276,6 +276,9 @@ def post_process(result_seg, result_con, sample_id=None):
     trans_con = run_transforms(result_con, transforms_con)
     trans_con = trans_con / np.max(trans_con)
     trans_con = scipy.stats.gmean(np.dstack((result_con, trans_con)), axis=2)
+    #np.save('/tmp/nuclei/con2.npy', trans_con)
+    #np.save('/tmp/nuclei/res2.npy', result_con)
+    #return
     if _DEBUG_:
         util.plot_compare(result_con, trans_con, "result_con", "trans_con")
     
