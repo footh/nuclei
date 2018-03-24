@@ -36,16 +36,44 @@ OVERLAP_CONST = 2
 #         10000: 50
 #     }
 
+# newsz2 yeilds 0.448 on LB
+# SIZE_MININUMS = {
+#         100: 10,
+#         200: 20,
+#         300: 30,
+#         400: 40,
+#         500: 50,
+#         600: 60,
+#         800: 70,
+#         10000: 80
+#     }
+
+# newsz3 yeilds 0.450 on LB
 SIZE_MININUMS = {
-        100: 10,
-        200: 20,
-        300: 30,
-        400: 40,
-        500: 50,
-        600: 60,
-        800: 70,
-        10000: 80
+     
+        100: 15,
+        200: 25,
+        300: 35,
+        400: 45,
+        500: 55,
+        600: 65,
+        800: 75,
+        10000: 85
     }
+
+# newsz4 yeilds 0.447 on LB
+# SIZE_MININUMS = {
+#     
+#         100: 20,
+#         200: 30,
+#         300: 40,
+#         400: 50,
+#         500: 60,
+#         600: 70,
+#         800: 80,
+#         10000: 90
+#     }
+
 
 SIZE_MAX_MEAN_MULT = 6
 
@@ -71,6 +99,7 @@ def SET_DEBUG(val=False, write=False, path='eval'):
 # Run-length encoding taken from https://www.kaggle.com/rakhlin/fast-run-length-encoding-python
 def rle_encoding(x):
     dots = np.where(x.T.flatten() == 1)[0]
+    
     run_lengths = []
     prev = -2
     for b in dots:
@@ -83,9 +112,14 @@ def rle_encoding(x):
     return run_lengths
 
 
-def rle_labels(labels):
+def rle_labels(labels, dilate=None):
     for i in range(1, labels.max() + 1):
-        yield rle_encoding(labels == i)
+        x = (labels == i)
+        if dilate is not None:
+            selem = morphology.disk(dilate)
+            x = morphology.binary_dilation(x, selem=selem)
+        
+        yield rle_encoding(x)
 
 
 # -------------------------------------------------
@@ -336,13 +370,15 @@ def post_process(result_seg, result_con, sample_id=None):
         d_img  = img_as_ubyte(label2rgb(result_sized, bg_label=0))
         Image.fromarray(d_img).save(f"/tmp/nuclei/{FLAGS.debug_path}/{sample_id}.png")
     
-    # **DONE** TODO: close the result? May help if holes are common but might not if it closes valid cracks
+    # **DONE** make slightly worse TODO: close the result? May help if holes are common but might not if it closes valid cracks
     # **DONE** worked TODO: may also consider a close on 'segments'. 1-pixel borders may not be valid divisions (contours tend to create much bigger separations)
     # **DONE** made worse TODO: may also consider an open on 'segments'. I've seen some very thin connections that were invalid
     # **DONE** fixing spline helped TODO: remove really small labels, on purple ones, there's a lot of salt that gets labelled and can cause a segment INSIDE a larger one
     # **DONE** fixing spline helped Definitely should consider running an open to remove salt especially on purple ones see #0-8
     # **DONE** no vas TODO: another fix for above is to do the watershed separation method (see valid #52)
     # TODO: see clear_border method which removes dots near borders
+    # ** DONE **, tried dilation on labels, bad
+    
     return result_sized
 
 
@@ -433,7 +469,8 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
 
         result = post_process(result_seg, result_con, sample_id=sample_info['id'])
         
-        for rle_label in rle_labels(result):
+        # Trying dilation (and closing) here resulted in duplicate pixels which the submission code caught
+        for rle_label in rle_labels(result, dilate=None):
             rle_results.append([sample_info['id']] + [rle_label])
             
     return rle_results
@@ -495,7 +532,7 @@ def evaluate_abut(trained_checkpoint, src='test', pixel_threshold=0.5, contour_t
 
         result = post_process(result_seg, result_con)
         
-        for rle_label in rle_labels(result):
+        for rle_label in rle_labels(result, dilate=None):
             rle_results.append([sample_info['id']] + [rle_label])
 
     return rle_results
