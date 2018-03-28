@@ -1,10 +1,10 @@
 import tensorflow as tf
 from tensorflow.contrib import slim
-from tensorflow.python.platform import gfile
 
 import numpy as np
 import os
 
+import config
 import model
 import data
 
@@ -132,7 +132,7 @@ def _get_train_dir():
     """
         Returns the train directory, makes the directory if it doesn't exist
     """
-    cur_train_dir = os.path.join(TRAIN_BASE_DIR, FLAGS.run_desc)
+    cur_train_dir = os.path.join(config.NUCLEI_HOME, TRAIN_BASE_DIR, FLAGS.run_desc)
     tf.gfile.MakeDirs(cur_train_dir)
     return cur_train_dir
 
@@ -240,7 +240,8 @@ def train():
     
     # Restore any provided checkpoint. Variables initialized above will be overwritten.
     if FLAGS.checkpoint_file is not None:
-        restore_from_checkpoint(FLAGS.checkpoint_file, sess, var_filter=FLAGS.checkpoint_filter)
+        src_path = os.path.join(config.NUCLEI_HOME, FLAGS.checkpoint_file)
+        restore_from_checkpoint(src_path, sess, var_filter=FLAGS.checkpoint_filter)
     
     tf.logging.info('Training from step: %d ', start_step)
     
