@@ -36,7 +36,7 @@ OVERLAP_CONST = 2
 #         10000: 50
 #     }
 
-# newsz2 yeilds 0.448 on LB
+# newsz2 yields 0.448 on LB
 # SIZE_MININUMS = {
 #         100: 10,
 #         200: 20,
@@ -48,7 +48,7 @@ OVERLAP_CONST = 2
 #         10000: 80
 #     }
 
-# newsz3 yeilds 0.450 on LB
+# newsz3 yields 0.450 on LB
 SIZE_MININUMS = {
      
         100: 15,
@@ -61,7 +61,7 @@ SIZE_MININUMS = {
         10000: 85
     }
 
-# newsz4 yeilds 0.447 on LB
+# newsz4 yields 0.447 on LB
 # SIZE_MININUMS = {
 #     
 #         100: 20,
@@ -77,8 +77,8 @@ SIZE_MININUMS = {
 
 SIZE_MAX_MEAN_MULT = 6
 
-CON_MULT = 1.8
-SEG_THRESH = 0.4
+CON_MULT = 2.0
+SEG_THRESH = 0.5
 
 _DEBUG_ = False
 _DEBUG_WRITE_ = False
@@ -198,7 +198,21 @@ def run_transforms(imga, transforms):
     
     return transformed_image
 # -------------------------------------------------    
-    
+
+
+def affine_augment(tiles, flip, rotation):
+    """
+        Run simple flip and rotation augmentation on batch of inputs
+    """
+    result = np.zeros(tiles.shape)
+    for i, tile in enumerate(tiles):
+        if flip:
+            result[i] = tile[:, ::-1]
+
+        result[i] = np.rot90(tile, rotation)
+
+    return result
+
     
 def _spline_window(window_size, power=2):
     """
@@ -404,7 +418,6 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
         spline_window = _spline_window(window_size)
 
     rle_results = []
-    #for cnt in range(0, 1):
     for cnt in range(0, data_processor.mode_size(mode='test')):
         sample_tiles, sample_info = data_processor.batch_test(offset=cnt, overlap_const=OVERLAP_CONST)
         if _DEBUG_WRITE_:
@@ -417,16 +430,32 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
         
         sample_batch = sample_tiles.reshape(tile_rows * tile_cols, *sample_tiles.shape[2:])
 
-        # TODO: parameterize
-        batch_size = 8
-        pred_batches = []
-        for i in range(0, sample_batch.shape[0], batch_size):
-            pred_batch = sess.run(pred_full, feed_dict={img_input: sample_batch[i:i + batch_size]})
-            pred_batches.append(pred_batch)
+        all_predictions = []
+        # Run predictions on each affine augmentation (rotation, flip)
+        for flip in range(2):
+            for rotation in range(4):
+                tf.logging.info(f"flip, rotation: {flip}, {rotation}")
+                sample_batch_aug = affine_augment(sample_batch, flip, rotation)
 
-        sample_pred = np.concatenate(pred_batches)
-        tf.logging.info(f"sample_pred.shape: {sample_pred.shape}")
-    
+                # TODO: parameterize
+                batch_size = 8
+                pred_batches = []
+                for i in range(0, sample_batch_aug.shape[0], batch_size):
+                    pred_batch = sess.run(pred_full, feed_dict={img_input: sample_batch_aug[i:i + batch_size]})
+                    pred_batches.append(pred_batch)
+
+                sample_pred = np.concatenate(pred_batches)
+                tf.logging.info(f"sample_pred.shape (post-batch): {sample_pred.shape}")
+
+                # Reverse the augmentation and store in list
+                sample_pred = affine_augment(sample_pred, flip, -rotation)
+
+                all_predictions.append(sample_pred)
+
+        # Take the mean of the predictions
+        sample_pred = np.mean(all_predictions, axis=0)
+        tf.logging.info(f"sample_pred.shape (post-mean): {sample_pred.shape}")
+
         sample_pred = sample_pred.reshape(tile_rows, tile_cols, *sample_pred.shape[1:])
         # -------------------------------------------
     

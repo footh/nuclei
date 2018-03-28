@@ -339,6 +339,33 @@ def upsample2(seg_layers, con_layers, img_size):
             input = layers.conv2d(input, 3, 1, padding='VALID', scope=f"conv2")
 
 -------------------------
+def test():
+    data_processor = data.DataProcessor(src='vtest', img_size=256, testing_pct=100)
+
+    sample_tiles, sample_info = data_processor.batch_test(offset=0, overlap_const=2)
+
+    tile_rows, tile_cols = sample_tiles.shape[0:2]
+    tf.logging.info(f"tile_rows, tile_cols: {tile_rows}, {tile_cols}")
+
+    sample_batch = sample_tiles.reshape(tile_rows * tile_cols, *sample_tiles.shape[2:])
+
+    for flip in range(2):
+        for rotation in range(4):
+            sample_batch = affine_augment(sample_batch, flip, rotation)
+            for i, tile in enumerate(sample_batch):
+                print(f"max, min before: {np.max(tile)}, {np.min(tile)}")
+                tile += data.VGG_RGB_MEANS
+                print(f"max, min after: {np.max(tile)}, {np.min(tile)}")
+                Image.fromarray(np.asarray(tile, dtype=np.uint8)).save(f"/tmp/nuclei/data/tile-pre{i}-f{flip}-r{rotation}.png")
+                tile -= data.VGG_RGB_MEANS
+
+            sample_batch = affine_augment(sample_batch, flip, -rotation)
+            for i, tile in enumerate(sample_batch):
+                print(f"max, min before: {np.max(tile)}, {np.min(tile)}")
+                tile += data.VGG_RGB_MEANS
+                print(f"max, min after: {np.max(tile)}, {np.min(tile)}")
+                Image.fromarray(np.asarray(tile, dtype=np.uint8)).save(f"/tmp/nuclei/data/tile-post{i}-f{flip}-r{rotation}.png")
+                tile -= data.VGG_RGB_MEANS
 -------------------------
 -------------------------
 -------------------------
