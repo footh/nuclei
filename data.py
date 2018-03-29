@@ -64,7 +64,7 @@ CONTOUR_DILATION = {
 
 
 CONTOUR_FREQ_RATIO = 0.01 # Ratio of positive contour labels that must be in a sample to be considered a hit
-CONTOUR_FREQ = 0.8 # Percentage of a batch that must contain contour label hits
+CONTOUR_FREQ = 0.6 # Percentage of a batch that must contain contour label hits
 CONTOUR_CONTINUE_MAX = 100 # Amount of times to try a different sample before just moving on with the batch
 
 _DEBUG_ = True
@@ -345,7 +345,48 @@ def et_test():
     Image.fromarray(imgt[:,:,0:4]).save('/tmp/nuclei/test-src.png')
     Image.fromarray(imgts).save('/tmp/nuclei/test-seg.png')
     Image.fromarray(imgtc).save('/tmp/nuclei/test-con.png')
-    
+
+
+def convert_masks(image_id, combine_threshold=0.20, size=3):
+    nm = str(int(combine_threshold * 100))
+
+    os.makedirs(f"./raw-data/train-{nm}/{image_id}/images", exist_ok=True)
+    os.makedirs(f"./raw-data/train-{nm}/{image_id}/masks", exist_ok=True)
+    img_src = f"./raw-data/train-new/{image_id}/images/{image_id}.png"
+    shutil.copy2(img_src, img_src.replace('train-new', f"train-{nm}"))
+
+    combined_masks = set()
+    selem = morphology.disk(size)
+
+    search_path = f"./raw-data/train-new/{image_id}/masks/*.png"
+    mask_files = glob.glob(search_path)
+    for i in range(len(mask_files)):
+        if mask_files[i] in combined_masks:
+            continue
+
+        working_mask = np.asarray(Image.open(mask_files[i])) / 255.
+        working_mask_dilate = morphology.dilation(working_mask, selem)
+        working_mask_ext = (working_mask_dilate - working_mask)
+
+        for j in range(i + 1, len(mask_files)):
+            if mask_files[j] in combined_masks:
+                continue
+
+            compare_mask = np.asarray(Image.open(mask_files[j])) / 255.
+            area = np.sum(compare_mask)
+
+            intersection = np.logical_and(working_mask_ext, compare_mask)
+            area_intersection = np.sum(intersection)
+
+            overlap = area_intersection / area
+            if overlap > combine_threshold:
+                working_mask = np.logical_or(working_mask, compare_mask)
+                working_mask_dilate = morphology.dilation(working_mask, selem)
+                working_mask_ext = (working_mask_dilate - working_mask)
+                combined_masks.add(mask_files[j])
+
+        Image.fromarray(skimage.img_as_ubyte(working_mask)).save(mask_files[i].replace('train-new', f"train-{nm}"))
+
 
 class DataProcessor:
     
@@ -388,6 +429,15 @@ class DataProcessor:
                                                 iaa.WithChannels(2, iaa.Add((0, 100)))
                                             ])
                                         ], random_order=True))
+
+        # Image augmentation (noise, blur, contrast, brightness)
+        self._image_aug = iaa.Sometimes(0.5,
+                                        iaa.OneOf([
+                                            iaa.AdditiveGaussianNoise(scale=(0, 0.05*255)),
+                                            iaa.GaussianBlur(sigma=(0, 1.0)),
+                                            iaa.ContrastNormalization((0.9, 1.1)),
+                                            iaa.Multiply((0.8, 1.2))
+                                        ]))
 
     def _generate_data_index(self):
         """
@@ -512,11 +562,9 @@ class DataProcessor:
             sample_con = sample_con[:, ::-1]
             tf.logging.debug(f"Mirrored on columns")
 
-        #sample = self._color_aug.augment_image(sample)
+        # sample = self._color_aug.augment_image(sample)
+        sample = self._image_aug.augment_image(sample)
 
-        # TODO: distortion
-        # TODO: brightness
-        # TODO: noise - see test set for example of noisy image (note: bright and purple ones appear more consistent re: noise
         return sample, sample_seg, sample_con
 
     def _labels(self, sample_id, pad_info):

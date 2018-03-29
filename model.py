@@ -250,6 +250,7 @@ def upsample(ds_layers, img_size, type='seg'):
     
     return upsampled_outputs   
 
+
 def residual_ds_layers(ds_layers, type='seg'):
     """
         Perform a residual block on each incoming downsampled layer
@@ -264,6 +265,7 @@ def residual_ds_layers(ds_layers, type='seg'):
         residual_output.append(net)
 
     return residual_output
+
 
 def process_ds_layers(ds_layers, channels_out=256, type='seg'):
     """
