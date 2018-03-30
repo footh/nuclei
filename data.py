@@ -10,8 +10,10 @@ import sys
 import os
 import pandas as pd
 import shutil
+import glob
 import numpy as np
 from PIL import Image
+import skimage
 from sklearn.cluster import KMeans
 from skimage import measure
 from skimage import morphology
@@ -218,6 +220,7 @@ def setup(src='train', with_masks=True, early_stop=None):
         are id-{type}.png where type is 'src' for source image, 'seg' for segment mask and 'con' for contour mask
     """
     src_dir = os.path.join('model-data', src)
+    os.makedirs(src_dir, exist_ok=True)
     print(f"Clearing {src_dir} directory...")
     _remove_files(src_dir)
 
@@ -347,18 +350,18 @@ def et_test():
     Image.fromarray(imgtc).save('/tmp/nuclei/test-con.png')
 
 
-def convert_masks(image_id, combine_threshold=0.20, size=3):
+def convert_masks(image_id, combine_threshold=0.50, size=4):
     nm = str(int(combine_threshold * 100))
 
     os.makedirs(f"./raw-data/train-{nm}/{image_id}/images", exist_ok=True)
     os.makedirs(f"./raw-data/train-{nm}/{image_id}/masks", exist_ok=True)
-    img_src = f"./raw-data/train-new/{image_id}/images/{image_id}.png"
-    shutil.copy2(img_src, img_src.replace('train-new', f"train-{nm}"))
+    img_src = f"./raw-data/train/{image_id}/images/{image_id}.png"
+    shutil.copy2(img_src, img_src.replace('train', f"train-{nm}"))
 
     combined_masks = set()
     selem = morphology.disk(size)
 
-    search_path = f"./raw-data/train-new/{image_id}/masks/*.png"
+    search_path = f"./raw-data/train/{image_id}/masks/*.png"
     mask_files = glob.glob(search_path)
     for i in range(len(mask_files)):
         if mask_files[i] in combined_masks:
@@ -380,12 +383,12 @@ def convert_masks(image_id, combine_threshold=0.20, size=3):
 
             overlap = area_intersection / area
             if overlap > combine_threshold:
-                working_mask = np.logical_or(working_mask, compare_mask)
+                working_mask = np.logical_or(working_mask, compare_mask) * 1.
                 working_mask_dilate = morphology.dilation(working_mask, selem)
                 working_mask_ext = (working_mask_dilate - working_mask)
                 combined_masks.add(mask_files[j])
 
-        Image.fromarray(skimage.img_as_ubyte(working_mask)).save(mask_files[i].replace('train-new', f"train-{nm}"))
+        Image.fromarray(skimage.img_as_ubyte(working_mask)).save(mask_files[i].replace('train', f"train-{nm}"))
 
 
 class DataProcessor:
@@ -567,6 +570,19 @@ class DataProcessor:
 
         return sample, sample_seg, sample_con
 
+    def preprocess(self, sample, reverse=False):
+        """
+            Perform (or reverse) pre-processing. Expects a 3D array (H,W,C) or 4D batch (B,H,W,C)
+            Modifies the input directly
+        """
+        if reverse:
+            sample = sample + np.asarray(VGG_RGB_MEANS, dtype=np.float32)
+        else:
+            # Slim's vgg_preprocessing only does the mean subtraction
+            sample = sample - np.asarray(VGG_RGB_MEANS, dtype=np.float32)
+
+        return sample
+
     def _labels(self, sample_id, pad_info):
         """
             Get the ground truth from the id and pad as necessary
@@ -690,8 +706,8 @@ class DataProcessor:
                     Image.fromarray(sample_seg).save(f"/tmp/nuclei/{sample_id}-{IMG_SEGMENT}-aug.{IMG_EXT}")
                     Image.fromarray(sample_con).save(f"/tmp/nuclei/{sample_id}-{IMG_CONTOUR}-aug.{IMG_EXT}")
 
-            # Slim's vgg_preprocessing only does the mean subtraction (not the RGB to BGR)
-            sample_src = sample_src - np.asarray(VGG_RGB_MEANS, dtype=np.float32)
+            # Preprocess
+            sample_src = self.preprocess(sample_src)
             # Masks are black and white (0 and 255). Need to convert to labels.
             sample_seg = sample_seg / 255.
             sample_con = sample_con / 255.
@@ -749,8 +765,7 @@ class DataProcessor:
         
         sample_src = np.asarray(sample_src, dtype=np.float32)
         if normalize:
-            # Slim's vgg_preprocessing only does the mean subtraction (not the RGB to BGR)
-            sample_src = sample_src - VGG_RGB_MEANS
+            sample_src = self.preprocess(sample_src)
 
         step = self.img_size // overlap_const
         tf.logging.debug(f"step: {step}")
@@ -775,57 +790,5 @@ class DataProcessor:
                 for j in range(tiles.shape[1]):
                     img = Image.fromarray(np.asarray(tiles[i, j, :], dtype=np.uint8))
                     img.save(f"/tmp/nuclei/r{i}c{j}.png")
-
-        return tiles, sample_info
-    
-    def batch_test_abut(self, offset=0, normalize=True):
-        """
-            Same as 'batch_test' except tiles are not overlapped but are abut
-        """
-        sample_info = {}
-        
-        sample_id = self.data_index['test'][offset]
-        sample_info['id'] = sample_id
-
-        sample_src = np.asarray(Image.open(os.path.join(self.src_dir, f"{sample_id}-{IMG_SRC}.{IMG_EXT}")))
-        if _DEBUG_WRITE_:
-            img = Image.fromarray(sample_src)
-            img.save(f"/tmp/nuclei/original.png")
-        tf.logging.debug(f"sample original shape: {sample_src.shape}")
-        sample_info['orig_shape'] = sample_src.shape
-        sample_src = sample_src[:, :, 0:IMG_CHANNELS]
-        
-        padding_row = (0, 0)
-        if sample_src.shape[0] % self.img_size > 0:
-            padding_ttl = self.img_size - (sample_src.shape[0] % self.img_size)
-            padding_row = (padding_ttl // 2, padding_ttl - padding_ttl // 2)
-        
-        padding_col = (0, 0)
-        if sample_src.shape[1] % self.img_size > 0:
-            padding_ttl = self.img_size - (sample_src.shape[1] % self.img_size)
-            padding_col = (padding_ttl // 2, padding_ttl - padding_ttl // 2)
-
-        tf.logging.debug(f"padding_row, padding_col: {padding_row}, {padding_col}")
-        sample_info['padding_row'] = padding_row
-        sample_info['padding_col'] = padding_col
-        sample_src = np.pad(sample_src, (padding_row, padding_col, (0, 0)), mode='reflect')
-
-        tf.logging.debug(f"sample padded shape: {sample_src.shape}")
-        prows, pcols, _ = sample_src.shape
-        
-        sample_src = np.asarray(sample_src, dtype=np.float32)
-        if normalize:
-            # Slim's vgg_preprocessing only does the mean subtraction (not the RGB to BGR)
-            sample_src = sample_src - VGG_RGB_MEANS
-
-        tiles = []
-        for i in range(0, prows, self.img_size):
-            tiles.append([])
-            for j in range(0, pcols, self.img_size):
-                tile = sample_src[i:i + self.img_size, j:j + self.img_size, :]
-                tiles[-1].append(tile)
-
-        tiles = np.asarray(tiles)
-        tf.logging.debug(f"tiles.shape: {tiles.shape}")
 
         return tiles, sample_info

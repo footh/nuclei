@@ -19,8 +19,8 @@ import sys
 # For debugging
 from PIL import Image
 from skimage.color import label2rgb
-from matplotlib import pyplot as plt
 from skimage import img_as_ubyte
+from imgaug import augmenters as iaa
 
 
 OVERLAP_CONST = 2
@@ -74,6 +74,16 @@ SIZE_MININUMS = {
 #         10000: 90
 #     }
 
+IMAGE_AUGS = [
+    iaa.AdditiveGaussianNoise(scale=0.025 * 255),
+    iaa.AdditiveGaussianNoise(scale=0.05 * 255),
+    iaa.GaussianBlur(sigma=0.5),
+    iaa.GaussianBlur(sigma=1.0),
+    iaa.ContrastNormalization(0.9),
+    iaa.ContrastNormalization(1.1),
+    iaa.Multiply(0.8),
+    iaa.Multiply(1.2)
+]
 
 SIZE_MAX_MEAN_MULT = 6
 
@@ -452,6 +462,23 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
 
                 all_predictions.append(sample_pred)
 
+        # sample_batch_raw = data_processor.preprocess(sample_batch, reverse=True)
+        # for aug in IMAGE_AUGS:
+        #     sample_batch_aug = aug.augment_images(sample_batch_raw)
+        #     sample_batch_aug = data_processor.preprocess(sample_batch_aug)
+        #
+        #     # TODO: parameterize
+        #     batch_size = 8
+        #     pred_batches = []
+        #     for i in range(0, sample_batch_aug.shape[0], batch_size):
+        #         pred_batch = sess.run(pred_full, feed_dict={img_input: sample_batch_aug[i:i + batch_size]})
+        #         pred_batches.append(pred_batch)
+        #
+        #     sample_pred = np.concatenate(pred_batches)
+        #     tf.logging.info(f"sample_pred.shape (post-batch): {sample_pred.shape}")
+        #
+        #     all_predictions.append(sample_pred)
+
         # Take the mean of the predictions
         sample_pred = np.mean(all_predictions, axis=0)
         tf.logging.info(f"sample_pred.shape (post-mean): {sample_pred.shape}")
@@ -505,66 +532,28 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
     return rle_results
 
 
-def evaluate_abut(trained_checkpoint, src='test', pixel_threshold=0.5, contour_threshold=0.5):
-    # TODO: parameterize
-    window_size = train.IMG_SIZE
-    
-    sess = tf.InteractiveSession()
+def test():
+    data_processor = data.DataProcessor(src='vtest', img_size=256, testing_pct=100)
+    sample_tiles, sample_info = data_processor.batch_test(offset=0, overlap_const=2)
+    tile_rows, tile_cols = sample_tiles.shape[0:2]
+    sample_batch = sample_tiles.reshape(tile_rows * tile_cols, *sample_tiles.shape[2:])
 
-    with tf.variable_scope(f"{train.MODEL_SCOPE}/data"):
-        img_input = tf.placeholder(tf.float32, [None, window_size, window_size, 3], name='img_input')
+    sample_batch_raw = data_processor.preprocess(sample_batch, reverse=True)
 
-    pred_full = build_model(img_input)
+    for i, tile in enumerate(sample_batch_raw):
+        print(f"OG {i}")
+        Image.fromarray(np.asarray(tile, dtype=np.uint8)).save(f"/tmp/nuclei/data/tile-{i}-orig.png")
 
-    train.restore_from_checkpoint(trained_checkpoint, sess)
+    for a, aug in enumerate(IMAGE_AUGS):
+        sample_batch_aug = aug.augment_images(sample_batch_raw)
 
-    data_processor = data.DataProcessor(src=src, img_size=window_size, testing_pct=100)
+        for i, tile in enumerate(sample_batch_aug):
+            print(f"max, min: {np.max(tile)}, {np.min(tile)}")
+            Image.fromarray(np.asarray(tile, dtype=np.uint8)).save(f"/tmp/nuclei/data/tile-{i}-aug{a}-{aug.name}.png")
 
-    for cnt in range(5, 10):
-        sample_tiles, sample_info = data_processor.batch_test_abut(offset=cnt)
-        
-        # Prediction --------------------------------
-        tile_rows, tile_cols = sample_tiles.shape[0:2]
-        tf.logging.info(f"tile_rows, tile_cols: {tile_rows}, {tile_cols}")
-        
-        # TODO: with large number of tiles, may need to batch this further
-        sample_batch = sample_tiles.reshape(tile_rows * tile_cols, *sample_tiles.shape[2:])
-    
-        sample_pred = sess.run(pred_full, feed_dict={img_input: sample_batch})
-        tf.logging.info(f"sample_pred.shape: {sample_pred.shape}")
-    
-        sample_pred = sample_pred.reshape(tile_rows, tile_cols, *sample_pred.shape[1:])
-        # -------------------------------------------
-
-        full_pred_rows = tile_rows * window_size
-        full_pred_cols = tile_cols * window_size
-        tf.logging.info(f"full_pred_rows, full_pred_cols: {full_pred_rows}, {full_pred_cols}")
-    
-        result_seg = np.zeros((full_pred_rows, full_pred_cols), dtype=np.float32)
-        result_con = np.zeros((full_pred_rows, full_pred_cols), dtype=np.float32)
-        divisors = np.zeros((full_pred_rows, full_pred_cols), dtype=np.float32)
-    
-        for i, row_start in enumerate(range(0, full_pred_rows, window_size)):
-            for j, col_start in enumerate(range(0, full_pred_cols, window_size)):
-                seg = sample_pred[i, j, :, :, 0]
-                con = sample_pred[i, j, :, :, 1]
-                result_seg[row_start:row_start + window_size, col_start:col_start + window_size] += seg
-                result_con[row_start:row_start + window_size, col_start:col_start + window_size] += con
-                divisors[row_start:row_start + window_size, col_start:col_start + window_size] += 1.
-    
-        padding_row = sample_info['padding_row']
-        padding_col = sample_info['padding_col']
-        result_seg = result_seg[padding_row[0]:full_pred_rows - padding_row[1], padding_col[0]:full_pred_cols - padding_col[1]]
-        result_con = result_con[padding_row[0]:full_pred_rows - padding_row[1], padding_col[0]:full_pred_cols - padding_col[1]]
-
-        # util._debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
-
-        result = post_process(result_seg, result_con)
-        
-        for rle_label in rle_labels(result, dilate=None):
-            rle_results.append([sample_info['id']] + [rle_label])
-
-    return rle_results
+    sample_batch = data_processor.preprocess(sample_batch_aug)
+    for tile in sample_batch:
+        print(f"max, min: {np.max(tile)}, {np.min(tile)}")
 
 
 def main(_):
