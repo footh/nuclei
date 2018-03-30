@@ -482,6 +482,32 @@ def evaluate_abut(trained_checkpoint, src='test', pixel_threshold=0.5, contour_t
 
     return rle_results
 -------------------------
+def kmeans(img_size=(256, 256), clusters=3):
+    """
+        Kmeans testing
+    """
+    print(f"Running kmeans...")
+    imgs = as_images(size=img_size)
+
+    vec_size = img_size[0]*img_size[1]
+    x = np.zeros((len(imgs), vec_size), dtype=np.float32)
+    for i, img in enumerate(imgs):
+        imga = np.asarray(img)
+        imga = imga[:,:,0:3]
+        imga = np.mean(imga, axis=2)
+        x[i] = imga.reshape(vec_size)
+
+    print(f"Data processed...")
+
+    km = KMeans(n_clusters=clusters, random_state=0).fit(x)
+    for i in range(clusters):
+        lbl_count = np.sum(km.labels_ == i)
+        print(f"cluster {i}: {lbl_count}")
+        print(f"cluster {i} ratio: {lbl_count/len(imgs)}")
+
+    return x, km
+
+
 -------------------------
 -------------------------
 -------------------------

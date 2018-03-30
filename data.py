@@ -14,7 +14,6 @@ import glob
 import numpy as np
 from PIL import Image
 import skimage
-from sklearn.cluster import KMeans
 from skimage import measure
 from skimage import morphology
 import hashlib
@@ -22,6 +21,7 @@ import math
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
 from imgaug import augmenters as iaa
+from multiprocessing import Pool
 
 IMG_EXT = 'png'
 IMG_CHANNELS = 3
@@ -128,32 +128,6 @@ def as_images(src='train', size=None):
         result.append(img)
     
     return result
-
-
-def kmeans(img_size=(256, 256), clusters=3):
-    """
-        Kmeans testing
-    """
-    print(f"Running kmeans...")
-    imgs = as_images(size=img_size)
-    
-    vec_size = img_size[0]*img_size[1]
-    x = np.zeros((len(imgs), vec_size), dtype=np.float32)
-    for i, img in enumerate(imgs):
-        imga = np.asarray(img)
-        imga = imga[:,:,0:3]
-        imga = np.mean(imga, axis=2)
-        x[i] = imga.reshape(vec_size)
-    
-    print(f"Data processed...")
-     
-    km = KMeans(n_clusters=clusters, random_state=0).fit(x)
-    for i in range(clusters):
-        lbl_count = np.sum(km.labels_ == i)
-        print(f"cluster {i}: {lbl_count}")
-        print(f"cluster {i} ratio: {lbl_count/len(imgs)}")
-
-    return x, km
 
 
 def _draw_contours(src, dest):
@@ -350,18 +324,18 @@ def et_test():
     Image.fromarray(imgtc).save('/tmp/nuclei/test-con.png')
 
 
-def convert_masks(image_id, combine_threshold=0.50, size=4):
+def convert_masks(image_id, src='train', combine_threshold=0.50, size=4):
     nm = str(int(combine_threshold * 100))
 
-    os.makedirs(f"./raw-data/train-{nm}/{image_id}/images", exist_ok=True)
-    os.makedirs(f"./raw-data/train-{nm}/{image_id}/masks", exist_ok=True)
-    img_src = f"./raw-data/train/{image_id}/images/{image_id}.png"
-    shutil.copy2(img_src, img_src.replace('train', f"train-{nm}"))
+    os.makedirs(f"./raw-data/{src}-{nm}/{image_id}/images", exist_ok=True)
+    os.makedirs(f"./raw-data/{src}-{nm}/{image_id}/masks", exist_ok=True)
+    img_src = f"./raw-data/{src}/{image_id}/images/{image_id}.png"
+    shutil.copy2(img_src, img_src.replace(src, f"{src}-{nm}"))
 
     combined_masks = set()
     selem = morphology.disk(size)
 
-    search_path = f"./raw-data/train/{image_id}/masks/*.png"
+    search_path = f"./raw-data/{src}/{image_id}/masks/*.png"
     mask_files = glob.glob(search_path)
     for i in range(len(mask_files)):
         if mask_files[i] in combined_masks:
@@ -388,7 +362,23 @@ def convert_masks(image_id, combine_threshold=0.50, size=4):
                 working_mask_ext = (working_mask_dilate - working_mask)
                 combined_masks.add(mask_files[j])
 
-        Image.fromarray(skimage.img_as_ubyte(working_mask)).save(mask_files[i].replace('train', f"train-{nm}"))
+        Image.fromarray(skimage.img_as_ubyte(working_mask)).save(mask_files[i].replace(src, f"{src}-{nm}"))
+
+
+def list_convert_masks(image_ids, src='train'):
+    for image_id in image_ids:
+        print(f"On image id: {image_id}")
+        convert_masks(image_id, src=src)
+
+
+def multi_process_data(src='train', pool_fn=list_convert_masks, processes=8):
+    flist = raw_file_list(src=src)
+    image_ids = [os.path.splitext(os.path.basename(f))[0] for f in flist]
+    image_id_buckets = np.array_split(image_ids, processes)
+
+    pool = Pool(processes=processes)
+
+    pool.map(pool_fn, image_id_buckets)
 
 
 class DataProcessor:
@@ -502,7 +492,7 @@ class DataProcessor:
         for id in self.data_index[mode]:
             self.copy_id(id, src=src)
 
-    def _pad_to_size(self, sample):
+    def _pad_to_size(self, sample, auto_pad=64):
         """
             Adds padding to the sample to any side that is less than the image size. Original image size
             and adjustments are saved and returned in a dict
@@ -519,6 +509,12 @@ class DataProcessor:
             diff = self.img_size - cols
             left_adj = math.ceil(diff / 2)
             right_adj = math.floor(diff / 2)
+
+        if auto_pad is not None:
+            top_adj = max(auto_pad, top_adj)
+            bot_adj = max(auto_pad, bot_adj)
+            left_adj = max(auto_pad, left_adj)
+            right_adj = max(auto_pad, right_adj)
 
         sample = np.pad(sample, ((top_adj, bot_adj), (left_adj, right_adj), (0, 0)), mode=PAD_MODE)
 
