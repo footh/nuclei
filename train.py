@@ -16,7 +16,7 @@ TRAINING_STEPS = [8000, 4000, 4000, 4000]
 # For discrete learning rates
 LEARNING_RATES = [0.002, 0.001, 0.0007, 0.0003]
 # For exponential decay learning rate based on valid loss progress
-VALID_LOSS_STREAK_MAX = 5
+VALID_LOSS_STREAK_MAX = [5, 5, 7, 7, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10]
 EXPONENTIAL_DECAY_BASE = 0.8
 LEARNING_RATE_BASE = 0.001
 NEAR_LOSS_TOLERANCE = 0.0017
@@ -310,10 +310,10 @@ def train():
                 saver.save(sess, checkpoint_path, global_step=training_step)
             else:
                 valid_loss_streak += 1
-                if valid_loss_streak >= VALID_LOSS_STREAK_MAX:
+                if valid_loss_streak >= VALID_LOSS_STREAK_MAX[valid_loss_streak]:
                     valid_loss_streak = 0
                     valid_loss_streak_hits += 1
-                    tf.logging.info(f"Valdation loss has not improved for {VALID_LOSS_STREAK_MAX} steps")
+                    tf.logging.info(f"Valdation loss has not improved for {VALID_LOSS_STREAK_MAX[valid_loss_streak]} steps")
                     tf.logging.info(f"Decay exponent increased to {valid_loss_streak_hits}")
 
                 # Saving last epoch that is within the tolerance of the best loss

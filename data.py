@@ -456,7 +456,8 @@ class DataProcessor:
     
         # Restrict to files in the processed directory
         all_files = file_list(self.src_dir)
-        flist = list({f"{os.path.basename(file).split('-')[0]}.{IMG_EXT}" for file in all_files})        
+        #flist = list({f"{os.path.basename(file).split('-')[0]}.{IMG_EXT}" for file in all_files})
+        flist = list({f"{os.path.splitext(os.path.basename(file))[0][:-4]}.{IMG_EXT}" for file in all_files})
         df = df.query('filename in @flist')
     
         result = dict(df.groupby(df.foreground + '-' + df.background)['filename'].apply(list))

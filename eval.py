@@ -292,28 +292,53 @@ def size_boundaries(sizes):
 
 
 def split_labels(labels):
+    rprops = skimage.measure.regionprops(labels)
+
     result = np.zeros(labels.shape)
     cur_label = 1
     for i in range(1, labels.max() + 1):
-        mask = (labels == i)
-        size = np.sum(mask)
-        print(f"size: {size}")
-        distance = ndi.distance_transform_edt(mask)
-        util.plot_compare(mask, distance, "mask", "distance")
-        #local_max = feature.peak_local_max(distance, indices=False, num_peaks=2, labels=mask)
-        lmc = feature.peak_local_max(distance, num_peaks=2, footprint=np.ones((15, 15)), labels=mask)
-        print(f"lmc: {lmc}")
-        local_max = np.zeros(labels.shape)
-        local_max[lmc[:,0], lmc[:,1]] = 1
-        print(f"local_max TOTAL: {np.sum(local_max)}")
-        label_max = morphology.label(local_max)
-        label_max_filled = morphology.watershed(-distance, label_max, mask=mask)
-        util.plot_compare(label_max, label_max_filled, "label_max", "label_max_filled")
-        for j in range(1, label_max_filled.max() + 1):
-            result[label_max_filled == j] = cur_label
-            cur_label += 1
+        if rprops[i - 1].convex_area / rprops[i - 1].filled_area > 1.1:
+            mask = (labels == i)
+            size = np.sum(mask)
+            print(f"size: {size}")
+            distance = ndi.distance_transform_edt(mask)
+            util.plot_compare(mask, distance, "mask", "distance")
+            #local_max = feature.peak_local_max(distance, indices=False, num_peaks=2, labels=mask)
+            lmc = feature.peak_local_max(distance, num_peaks=2, footprint=np.ones((15, 15)), labels=mask)
+            print(f"lmc: {lmc}")
+            local_max = np.zeros(labels.shape)
+            local_max[lmc[:,0], lmc[:,1]] = 1
+            print(f"local_max TOTAL: {np.sum(local_max)}")
+            label_max = morphology.label(local_max)
+            label_max_filled = morphology.watershed(-distance, label_max, mask=mask)
+            util.plot_compare(label_max, label_max_filled, "label_max", "label_max_filled")
+            for j in range(1, label_max_filled.max() + 1):
+                result[label_max_filled == j] = cur_label
+                cur_label += 1
             
     return result
+
+
+def split_convexity(labels):
+    rprops = skimage.measure.regionprops(labels)
+    for rprop in rprops:
+        print(f"convex area, filled_area: {rprop.convex_area}, {rprop.filled_area}")
+
+
+def super_frangi(img):
+    inv_img = invert(img)
+
+    frangis = []
+
+    frangis.append(frangi_filter(inv_img, scale_range=(0, 8), scale_step=0.4))
+    frangis.append(frangi_filter(inv_img, scale_range=(0, 4), scale_step=0.1))
+    frangis.append(frangi_filter(inv_img, scale_range=(1, 10), scale_step=0.5))
+    frangis.append(frangi_filter(inv_img, scale_range=(1, 15), scale_step=1))
+
+    frangis = [(f / np.max(f)) for f in frangis]
+
+    return scipy.stats.gmean(np.dstack(frangis), axis=2)
+    # return np.mean(np.dstack(frangis), axis=2)
 
 
 def post_process(result_seg, result_con, sample_id=None):
@@ -327,16 +352,22 @@ def post_process(result_seg, result_con, sample_id=None):
     transforms_con[invert] = {}
     transforms_con[frangi_filter] = {}
     # transforms_con[threshold] = {'method': 'li'}
-    
+
     thresh_seg = run_transforms(result_seg, transforms_seg)
     
     #np.save('/tmp/nuclei/con.npy', result_con)
     trans_con = run_transforms(result_con, transforms_con)
     trans_con = trans_con / np.max(trans_con)
+
+    # sf = super_frangi(result_con)
+    # if _DEBUG_:
+    #     util.plot_compare(trans_con, sf, "frangi", "super frangi")
+
     trans_con = scipy.stats.gmean(np.dstack((result_con, trans_con)), axis=2)
-    #np.save('/tmp/nuclei/con2.npy', trans_con)
-    #np.save('/tmp/nuclei/res2.npy', result_con)
-    #return
+    # trans_con = scipy.stats.gmean(np.dstack((result_con, sf)), axis=2)
+    # np.save('/tmp/nuclei/con2.npy', trans_con)
+    # np.save('/tmp/nuclei/res2.npy', result_con)
+    # return
     if _DEBUG_:
         util.plot_compare(result_con, trans_con, "result_con", "trans_con")
     
@@ -349,8 +380,8 @@ def post_process(result_seg, result_con, sample_id=None):
         
     #segments_cl = close_filter(segments)
     segments_cl = segments
-    if _DEBUG_:
-        util.plot_compare(segments, segments_cl, "segments", "segments_cl")
+    # if _DEBUG_:
+    #     util.plot_compare(segments, segments_cl, "segments", "segments_cl")
 
     labels = morphology.label(segments_cl)
     if _DEBUG_:
@@ -393,6 +424,7 @@ def post_process(result_seg, result_con, sample_id=None):
         if sample_id is None: sample_id = 'result_sized'
         d_img  = img_as_ubyte(label2rgb(result_sized, bg_label=0))
         Image.fromarray(d_img).save(f"/tmp/nuclei/{FLAGS.debug_path}/{sample_id}.png")
+        np.save(f"/tmp/nuclei/{FLAGS.debug_path}/{sample_id}.npy", result_sized)
     
     # **DONE** make slightly worse TODO: close the result? May help if holes are common but might not if it closes valid cracks
     # **DONE** worked TODO: may also consider a close on 'segments'. 1-pixel borders may not be valid divisions (contours tend to create much bigger separations)
