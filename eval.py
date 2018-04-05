@@ -11,6 +11,8 @@ import skimage
 from skimage import morphology
 from skimage import filters
 from skimage import feature
+from scipy.spatial import distance
+import cv2
 import datetime
 import os
 import csv
@@ -74,15 +76,22 @@ SIZE_MININUMS = {
 #         10000: 90
 #     }
 
+# IMAGE_AUGS = [
+#     iaa.AdditiveGaussianNoise(scale=0.025 * 255),
+#     iaa.AdditiveGaussianNoise(scale=0.05 * 255),
+#     iaa.GaussianBlur(sigma=0.5),
+#     iaa.GaussianBlur(sigma=1.0),
+#     iaa.ContrastNormalization(0.9),
+#     iaa.ContrastNormalization(1.1),
+#     iaa.Multiply(0.8),
+#     iaa.Multiply(1.2)
+# ]
+
 IMAGE_AUGS = [
-    iaa.AdditiveGaussianNoise(scale=0.025 * 255),
-    iaa.AdditiveGaussianNoise(scale=0.05 * 255),
-    iaa.GaussianBlur(sigma=0.5),
-    iaa.GaussianBlur(sigma=1.0),
-    iaa.ContrastNormalization(0.9),
+    iaa.AdditiveGaussianNoise(scale=0.03 * 255),
+    iaa.GaussianBlur(sigma=0.67),
     iaa.ContrastNormalization(1.1),
-    iaa.Multiply(0.8),
-    iaa.Multiply(1.2)
+    iaa.Multiply(1.1)
 ]
 
 SIZE_MAX_MEAN_MULT = 6
@@ -319,10 +328,68 @@ def split_labels(labels):
     return result
 
 
+CONVEX_OVERFLOW_MIN = 1.1  # Convex hull area overflow ratio
+CONVEX_DIST_MIN = 0.1  # Far point distance must be this (percentage) amount of the minor axis length
+DIST_BASE_RATIO_MIN = 0.20  # Far point distance must be this (percentage) amount of the defect base
+
+
 def split_convexity(labels):
     rprops = skimage.measure.regionprops(labels)
-    for rprop in rprops:
-        print(f"convex area, filled_area: {rprop.convex_area}, {rprop.filled_area}")
+    selem = skimage.morphology.disk(1)
+
+    result = np.zeros(labels.shape, dtype=np.int16)
+    cur_label = 1
+    for i in range(1, labels.max() + 1):
+        mask = (labels == i).astype(np.uint8)
+        mask = morphology.closing(mask, selem)
+        if rprops[i - 1].convex_area / rprops[i - 1].filled_area > CONVEX_OVERFLOW_MIN:
+            minor_axis_len = rprops[i - 1].minor_axis_length
+
+            _, contours, _ = cv2.findContours(mask, 2, 1)
+            cnt = contours[0]
+            hull = cv2.convexHull(cnt, returnPoints=False)
+
+            defects = cv2.convexityDefects(cnt, hull)
+
+            key_points = []
+            for j in range(defects.shape[0]):
+                s, e, f, d = defects[j, 0]
+                start = tuple(cnt[s][0])
+                end = tuple(cnt[e][0])
+                far = tuple(cnt[f][0])
+                norm_dist = (d / 256.)
+
+                # Far point distance as a ratio of minor axis length
+                norm_dist_ratio = norm_dist / minor_axis_len
+                # Ratio of far point distance to base
+                dist_base_ratio = norm_dist / distance.euclidean(start, end)
+
+                if norm_dist_ratio > CONVEX_DIST_MIN and dist_base_ratio > DIST_BASE_RATIO_MIN:
+                    key_points.append(far)
+
+            if len(key_points) >= 2:
+                for k in range(len(key_points)):
+                    p1 = key_points[k]
+
+                    nearest = None
+                    min_dist = np.inf
+                    for l in range(len(key_points)):
+                        if k != l:
+                            p2 = key_points[l]
+                            dist = distance.euclidean(p1, p2)
+                            if dist < min_dist:
+                                min_dist = dist
+                                nearest = p2
+
+                    if nearest is not None:
+                        cv2.line(mask, p1, nearest, [0, 0, 0], 2)
+
+        labels_new = morphology.label(mask)
+        for j in range(1, labels_new.max() + 1):
+            result[labels_new == j] = cur_label
+            cur_label += 1
+
+    return result
 
 
 def super_frangi(img):
@@ -416,25 +483,65 @@ def post_process(result_seg, result_con, sample_id=None):
     tf.logging.info(f"Shape: {result.shape}, Size data, min: {min(sizes)}, max: {max(sizes)}, avg: {np.mean(sizes):.4f}, std: {np.std(sizes):.4f}")
     tf.logging.info(f"Result label count (small labels removed): {result_sized.max()}")
 
-#     result_sized_split = split_labels(result_sized)
-#     if _DEBUG_:
-#         util.plot_compare(label2rgb(result_sized, bg_label=0), label2rgb(result_sized_split, bg_label=0), "result_sized", "result_sized_split")
-    
     if _DEBUG_WRITE_:
         if sample_id is None: sample_id = 'result_sized'
-        d_img  = img_as_ubyte(label2rgb(result_sized, bg_label=0))
+        d_img = img_as_ubyte(label2rgb(result_sized, bg_label=0))
         Image.fromarray(d_img).save(f"/tmp/nuclei/{FLAGS.debug_path}/{sample_id}.png")
         np.save(f"/tmp/nuclei/{FLAGS.debug_path}/{sample_id}.npy", result_sized)
-    
-    # **DONE** make slightly worse TODO: close the result? May help if holes are common but might not if it closes valid cracks
+
+    # **DONE** made slightly worse TODO: close the result? May help if holes are common but might not if it closes valid cracks
     # **DONE** worked TODO: may also consider a close on 'segments'. 1-pixel borders may not be valid divisions (contours tend to create much bigger separations)
     # **DONE** made worse TODO: may also consider an open on 'segments'. I've seen some very thin connections that were invalid
-    # **DONE** fixing spline helped TODO: remove really small labels, on purple ones, there's a lot of salt that gets labelled and can cause a segment INSIDE a larger one
     # **DONE** fixing spline helped Definitely should consider running an open to remove salt especially on purple ones see #0-8
     # **DONE** no vas TODO: another fix for above is to do the watershed separation method (see valid #52)
-    # TODO: see clear_border method which removes dots near borders
     # ** DONE **, tried dilation on labels, bad
-    
+    # TODO: see clear_border method which removes dots near borders
+
+    # Morphology split
+    # result_sized_split = split_labels(result_sized)
+    # if _DEBUG_:
+    #     util.plot_compare(label2rgb(result_sized, bg_label=0), label2rgb(result_sized_split, bg_label=0), "result_sized", "result_sized_split")
+
+    # Convexity split
+    # result_sized_sc = split_convexity(result_sized)
+    # result_sized_split = np.zeros(result_sized_sc.shape, dtype=result.dtype)
+    # size_misses = 0
+    # for i in range(1, result_sized_sc.max() + 1):
+    #     size = np.sum(result_sized_sc == i)
+    #     if size > size_min and size < size_max:
+    #         result_sized_split[result_sized_sc == i] = i - size_misses
+    #     else:
+    #         size_misses += 1
+    #
+    # if _DEBUG_:
+    #     util.plot_compare(label2rgb(result_sized, bg_label=0), label2rgb(result_sized_split, bg_label=0), "result_sized", "result_sized_split")
+    # if _DEBUG_WRITE_:
+    #     d_img = img_as_ubyte(label2rgb(result_sized_split, bg_label=0))
+    #     Image.fromarray(d_img).save(f"/tmp/nuclei/{FLAGS.debug_path}/{sample_id}-split.png")
+    #     np.save(f"/tmp/nuclei/{FLAGS.debug_path}/{sample_id}-split.npy", result_sized_split)
+
+    # Dilation
+    # result_sized_d = np.zeros(result.shape, dtype=result.dtype)
+    # selem = morphology.square(2)
+    # for i in range(1, result_sized.max() + 1):
+    #     mask = (result_sized == i)
+    #     mask = morphology.binary_dilation(mask, selem)
+    #     result_sized_d[mask] = i
+    #
+    # if _DEBUG_:
+    #     util.plot_compare(label2rgb(result_sized, bg_label=0), label2rgb(result_sized_d, bg_label=0), 'result_sized', 'result_sized_d')
+
+    # Closing
+    # result_sized_c = np.zeros(result.shape, dtype=result.dtype)
+    # selem = morphology.square(2)
+    # for i in range(1, result_sized.max() + 1):
+    #     mask = (result_sized == i)
+    #     mask = morphology.binary_closing(mask, selem)
+    #     result_sized_c[mask] = i
+    #
+    # if _DEBUG_:
+    #     util.plot_compare(label2rgb(result_sized, bg_label=0), label2rgb(result_sized_c, bg_label=0), 'result_sized', 'result_sized_c')
+
     return result_sized
 
 
@@ -474,7 +581,7 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
 
         all_predictions = []
         # Run predictions on each affine augmentation (rotation, flip)
-        for flip in range(2):
+        for flip in range(1):
             for rotation in range(4):
                 tf.logging.info(f"flip, rotation: {flip}, {rotation}")
                 sample_batch_aug = affine_augment(sample_batch, flip, rotation)

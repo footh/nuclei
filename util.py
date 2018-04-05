@@ -5,10 +5,12 @@ from matplotlib import pyplot as plt
 import numpy as np
 from skimage import morphology
 from skimage import filters
+from scipy.spatial import distance
 import data
 
 
 _DEBUG_ = False
+
 
 def plot_compare(img1, img2, title1='Image1', title2='Image2'):
     
@@ -38,6 +40,19 @@ def plot_hist(data, bins=50, ticks=(0, 1000, 20)):
     plt.xticks(rotation=90)    
     plt.grid(True)
     plt.show()    
+
+
+def area_triangle(p1, p2, p3):
+    """
+        Calculate the area of a triangle given three vertices
+    """
+    side1 = distance.euclidean(p1, p2)
+    side2 = distance.euclidean(p2, p3)
+    side3 = distance.euclidean(p1, p3)
+
+    s = (side1 + side2 + side3) / 2
+    area = (s * (s - side1) * (s - side2) * (s - side3)) ** 0.5
+    return area
 
 
 def _debug_output(dp, sample_id, result_seg, result_con, divisors):
