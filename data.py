@@ -22,6 +22,7 @@ from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
 from imgaug import augmenters as iaa
 from multiprocessing import Pool
+from collections import defaultdict
 
 IMG_EXT = 'png'
 IMG_CHANNELS = 3
@@ -395,6 +396,7 @@ class DataProcessor:
         self.validation_pct = validation_pct
         self.testing_pct = testing_pct
         self.data_index = {'train': [], 'valid': [], 'test': []}
+        self.data_dist = {'train': defaultdict(int), 'valid': defaultdict(int), 'test': defaultdict(int)}
 
         self._generate_data_index()
 
@@ -444,12 +446,13 @@ class DataProcessor:
             for id in id_list:
                 idx = which_set(id, self.validation_pct, self.testing_pct, radix=len(id_list))
                 self.data_index[idx].append(id)
+                self.data_dist[idx][class_key] += 1
             
         tf.logging.info(f"Training total: {len(self.data_index['train'])}")
         tf.logging.info(f"Validation total: {len(self.data_index['valid'])}")
         tf.logging.info(f"Testing total: {len(self.data_index['test'])}")
 
-    def _classes(self, file='classes.csv'):
+    def _classes(self, file='classes-mosaic.csv'):
         """
             Returns a dict of class type to file id for the given src
         """
@@ -457,19 +460,15 @@ class DataProcessor:
     
         # Restrict to files in the processed directory
         all_files = file_list(self.src_dir)
-        # flist = list({f"{os.path.basename(file).split('-')[0]}.{IMG_EXT}" for file in all_files})
-        flist = list({f"{os.path.splitext(os.path.basename(file))[0][:-4]}.{IMG_EXT}" for file in all_files})
-        df = df.query('filename in @flist')
+        id_list = list({os.path.splitext(os.path.basename(file))[0][:-4] for file in all_files})
+        df = df.query('img_id in @id_list')
     
-        result = dict(df.groupby(df.foreground + '-' + df.background)['filename'].apply(list))
+        result = dict(df.groupby(df.cluster)['img_id'].apply(list))
     
         ttl = 0
         for key, value in result.items():
-            id_list = [os.path.splitext(v)[0] for v in value]
-            result[key] = id_list
-
-            tf.logging.info(f"{key}: {len(id_list)}")
-            ttl += len(id_list)
+            tf.logging.info(f"{key}: {len(value)}")
+            ttl += len(value)
 
         tf.logging.info(f"Total unique files found: {ttl}")
 
