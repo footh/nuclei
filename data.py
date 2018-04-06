@@ -178,7 +178,8 @@ def full_mask(raw_file_path, with_contours=True):
     
     for m in masks:
         mask_img = Image.open(m)
-        if mask_img.mode is not 'L': raise Exception(f"Mask image is not L mode: {m}")
+        if mask_img.mode is not 'L':
+            raise Exception(f"Mask image is not L mode: {m}")
         mask_img = np.asarray(mask_img)
         mask = np.maximum(mask, mask_img)
         
@@ -456,7 +457,7 @@ class DataProcessor:
     
         # Restrict to files in the processed directory
         all_files = file_list(self.src_dir)
-        #flist = list({f"{os.path.basename(file).split('-')[0]}.{IMG_EXT}" for file in all_files})
+        # flist = list({f"{os.path.basename(file).split('-')[0]}.{IMG_EXT}" for file in all_files})
         flist = list({f"{os.path.splitext(os.path.basename(file))[0][:-4]}.{IMG_EXT}" for file in all_files})
         df = df.query('filename in @flist')
     
