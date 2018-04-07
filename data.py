@@ -439,7 +439,7 @@ class DataProcessor:
         """
             Build the index of files, bucketed by source group
         """
-        class_dict = self._classes()
+        class_dict = self._classes_mosaic()
 
         for class_key, id_list in class_dict.items():
             tf.logging.info(f"Allotting for class: {class_key}")
@@ -452,7 +452,29 @@ class DataProcessor:
         tf.logging.info(f"Validation total: {len(self.data_index['valid'])}")
         tf.logging.info(f"Testing total: {len(self.data_index['test'])}")
 
-    def _classes(self, file='classes-mosaic.csv'):
+    def _classes_mosaic(self, file='classes-mosaic.csv'):
+        """
+            Returns a dict of class type to file id for the given src
+        """
+        df = pd.read_csv(file)
+
+        # Restrict to files in the processed directory
+        all_files = file_list(self.src_dir)
+        id_list = list({os.path.splitext(os.path.basename(file))[0][:-4] for file in all_files})
+        df = df.query('img_id in @id_list')
+
+        result = dict(df.groupby(df.cluster)['img_id'].apply(list))
+
+        ttl = 0
+        for key, value in result.items():
+            tf.logging.info(f"{key}: {len(value)}")
+            ttl += len(value)
+
+        tf.logging.info(f"Total unique files found: {ttl}")
+
+        return result
+
+    def _classes(self, file='classes.csv'):
         """
             Returns a dict of class type to file id for the given src
         """
@@ -460,15 +482,18 @@ class DataProcessor:
     
         # Restrict to files in the processed directory
         all_files = file_list(self.src_dir)
-        id_list = list({os.path.splitext(os.path.basename(file))[0][:-4] for file in all_files})
-        df = df.query('img_id in @id_list')
-    
-        result = dict(df.groupby(df.cluster)['img_id'].apply(list))
+        flist = list({f"{os.path.splitext(os.path.basename(file))[0][:-4]}.{IMG_EXT}" for file in all_files})
+        df = df.query('img_id in @flist')
+
+        result = dict(df.groupby(df.foreground + '-' + df.background)['filename'].apply(list))
     
         ttl = 0
         for key, value in result.items():
-            tf.logging.info(f"{key}: {len(value)}")
-            ttl += len(value)
+            id_list = [os.path.splitext(v)[0] for v in value]
+            result[key] = id_list
+
+            tf.logging.info(f"{key}: {len(id_list)}")
+            ttl += len(id_list)
 
         tf.logging.info(f"Total unique files found: {ttl}")
 
