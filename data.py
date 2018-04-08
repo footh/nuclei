@@ -398,7 +398,7 @@ class DataProcessor:
         self.img_size = img_size
         self.validation_pct = validation_pct
         self.testing_pct = testing_pct
-        self.fold_keys = fold_keys if isinstance(fold_keys, list) else [fold_keys]
+        self.fold_keys = fold_keys if fold_keys is None or isinstance(fold_keys, list) else [fold_keys]
         self.data_index = {'train': [], 'valid': [], 'test': []}
         self.data_dist = {'train': defaultdict(int), 'valid': defaultdict(int), 'test': defaultdict(int)}
 
