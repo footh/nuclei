@@ -16,7 +16,7 @@ TRAINING_STEPS = [8000, 4000, 4000, 4000]
 # For discrete learning rates
 LEARNING_RATES = [0.002, 0.001, 0.0007, 0.0003]
 # For exponential decay learning rate based on valid loss progress
-VALID_LOSS_STREAK_MAX = [8, 8, 9, 10, 10, 10, 10, 10, 10]
+VALID_LOSS_STREAK_MAX = [8, 8, 9, 10, 10, 10, 10, 9, 9, 8, 8, 8, 7, 7, 7, 7, 7, 6, 6, 6, 6, 5, 5, 5, 5]
 EXPONENTIAL_DECAY_BASE = 0.8
 LEARNING_RATE_BASE = 0.001
 NEAR_LOSS_TOLERANCE = 0.0017

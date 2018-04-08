@@ -595,6 +595,9 @@ class DataProcessor:
             sample_con = sample_con[:, ::-1]
             tf.logging.debug(f"Mirrored on columns")
 
+        if np.random.randint(0, 2):
+            sample = skimage.util.invert(sample)
+
         # sample = self._color_aug.augment_image(sample)
         sample = self._image_aug.augment_image(sample)
 
