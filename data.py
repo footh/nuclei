@@ -385,7 +385,8 @@ def multi_process_data(src='train', pool_fn=list_convert_masks, processes=8):
 
 class DataProcessor:
     
-    def __init__(self, src='train', img_size=256, validation_pct=0, testing_pct=0, fold_keys=None, valid_same=True):
+    def __init__(self, src='train', img_size=256, validation_pct=0, testing_pct=0,
+                 fold_keys=None, valid_same=True, use_mosaics=False):
         """
             Build data processor for yielding train, valid and test data
 
@@ -401,6 +402,7 @@ class DataProcessor:
         self.fold_keys = fold_keys if fold_keys is None or isinstance(fold_keys, list) else [fold_keys]
         self.data_index = {'train': [], 'valid': [], 'test': []}
         self.data_dist = {'train': defaultdict(int), 'valid': defaultdict(int), 'test': defaultdict(int)}
+        self.use_mosaics = use_mosaics
 
         self._generate_data_index()
 
@@ -443,7 +445,10 @@ class DataProcessor:
         """
             Build the index of files, bucketed by source group
         """
-        class_dict = self._classes_mosaic()
+        if self.use_mosaics:
+            class_dict = self._classes_mosaic()
+        else:
+            class_dict = self._classes()
 
         for class_key, id_list in class_dict.items():
             tf.logging.info(f"Allotting for class: {class_key}")
@@ -526,7 +531,7 @@ class DataProcessor:
         for id in self.data_index[mode]:
             self.copy_id(id, src=src)
 
-    def _pad_to_size(self, sample, auto_pad=64):
+    def _pad_to_size(self, sample, auto_pad=None):
         """
             Adds padding to the sample to any side that is less than the image size. Original image size
             and adjustments are saved and returned in a dict
@@ -595,8 +600,8 @@ class DataProcessor:
             sample_con = sample_con[:, ::-1]
             tf.logging.debug(f"Mirrored on columns")
 
-        if np.random.randint(0, 2):
-            sample = skimage.util.invert(sample)
+        # if np.random.randint(0, 2):
+        #     sample = skimage.util.invert(sample)
 
         # sample = self._color_aug.augment_image(sample)
         sample = self._image_aug.augment_image(sample)
@@ -657,7 +662,7 @@ class DataProcessor:
         
         return hit, top, left
 
-    def batch(self, size, offset=0, mode='train'):
+    def batch(self, size, offset=0, mode='train', invert=False):
         """
             Return a batch of data from the given mode, offset by the given amount
         """
@@ -729,6 +734,8 @@ class DataProcessor:
             sample_src = sample_src[top:top + self.img_size, left:left + self.img_size, 0:IMG_CHANNELS]
             sample_seg = sample_seg[top:top + self.img_size, left:left + self.img_size]
             sample_con = sample_con[top:top + self.img_size, left:left + self.img_size]
+            if invert:
+                sample_src = skimage.util.invert(sample_src)
 
             # Augment the data if training
             if is_training:
@@ -742,8 +749,8 @@ class DataProcessor:
             # Preprocess
             sample_src = self.preprocess(sample_src)
             # Masks are black and white (0 and 255). Need to convert to labels.
-            sample_seg = sample_seg / 255.
-            sample_con = sample_con / 255.
+            sample_seg = (sample_seg / 255.).astype(np.float32)
+            sample_con = (sample_con / 255.).astype(np.float32)
 
             inputs[cur_idx] = sample_src
             labels_seg[cur_idx] = sample_seg
@@ -754,7 +761,7 @@ class DataProcessor:
 
         return inputs, labels_seg, labels_con
 
-    def batch_test(self, offset=0, overlap_const=2, normalize=True):
+    def batch_test(self, offset=0, overlap_const=2, normalize=True, invert=False):
         """
             Return a single sample from the test set (no labels). The sample is returned in a 2D array of 'img_size' tiles that
             comes from overlapping segments of the original sample with reflective padding. This array is row by columns and can be
@@ -792,9 +799,12 @@ class DataProcessor:
         sample_info['pad_row'] = pad_row
         sample_info['pad_col'] = pad_col
         
-        sample_src = np.pad(sample_src, (pad_row, pad_col, (0, 0)), mode='reflect')
+        sample_src = np.pad(sample_src, (pad_row, pad_col, (0, 0)), mode=PAD_MODE)
         tf.logging.debug(f"sample padded shape: {sample_src.shape}")
         prows, pcols, _ = sample_src.shape
+
+        if invert:
+            sample_src = skimage.util.invert(sample_src)
         
         sample_src = np.asarray(sample_src, dtype=np.float32)
         if normalize:

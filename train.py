@@ -175,7 +175,10 @@ def train():
         _write_notes(train_dir)
     
     fold_keys = [int(k) for k in FLAGS.fold_keys] if FLAGS.fold_keys is not None else None
-    data_processor = data.DataProcessor(img_size=IMG_SIZE, validation_pct=VALIDATION_PCT, fold_keys=fold_keys)
+    data_processor = data.DataProcessor(img_size=IMG_SIZE,
+                                        validation_pct=VALIDATION_PCT,
+                                        fold_keys=fold_keys,
+                                        use_mosaics=True)
     tf.logging.info(f"data_processor distribution: {data_processor.data_dist}")
 
     with tf.variable_scope(f"{MODEL_SCOPE}/data"):
@@ -260,7 +263,7 @@ def train():
         # learning_rate = _get_learning_rate(training_step)
         learning_rate = _get_learning_rate_decay(valid_loss_streak_hits)
 
-        x, y_seg, y_con = data_processor.batch(FLAGS.batch_size, offset=0, mode='train')
+        x, y_seg, y_con = data_processor.batch(FLAGS.batch_size, offset=0, mode='train', invert=FLAGS.invert)
         
         train_loss, train_iou_seg, train_iou_con, train_summary, _, _ = sess.run([total_loss, 
                                                                                   iou_seg, 
@@ -363,6 +366,10 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_list(
     'fold_keys', None,
     'List of cluster keys to use in validation fold. None means allotment by percentage.')
+
+tf.app.flags.DEFINE_boolean(
+    'invert', False,
+    'Whether to train with inverted images')
 
 # ----------------------
 # Checkpoint parameters
