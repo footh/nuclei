@@ -174,7 +174,9 @@ def train():
     if FLAGS.notes:
         _write_notes(train_dir)
     
-    data_processor = data.DataProcessor(img_size=IMG_SIZE, validation_pct=VALIDATION_PCT)
+    fold_keys = [int(k) for k in FLAGS.fold_keys] if FLAGS.fold_keys is not None else None
+    data_processor = data.DataProcessor(img_size=IMG_SIZE, validation_pct=VALIDATION_PCT, fold_keys=fold_keys)
+    tf.logging.info(f"data_processor distribution: {data_processor.data_dist}")
 
     with tf.variable_scope(f"{MODEL_SCOPE}/data"):
         is_training = tf.placeholder(tf.bool)
@@ -357,6 +359,10 @@ tf.app.flags.DEFINE_boolean(
 tf.app.flags.DEFINE_string(
     'trainable_scopes', None,
     'Comma-separated list of scopes to set as variables to train. None means everything is trained')
+
+tf.app.flags.DEFINE_list(
+    'fold_keys', None,
+    'List of cluster keys to use in validation fold. None means allotment by percentage.')
 
 # ----------------------
 # Checkpoint parameters

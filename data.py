@@ -385,9 +385,12 @@ def multi_process_data(src='train', pool_fn=list_convert_masks, processes=8):
 
 class DataProcessor:
     
-    def __init__(self, src='train', img_size=256, validation_pct=0, testing_pct=0, valid_same=True):
+    def __init__(self, src='train', img_size=256, validation_pct=0, testing_pct=0, fold_keys=None, valid_same=True):
         """
             Build data processor for yielding train, valid and test data
+
+            Providing a fold_key will put all data with the given cluster in the validation set and everything else
+            in training. The percentages are thus ignored.
             
             'valid_same' parameter will assure the sampling points on 'valid' mode will be the same across calls
         """
@@ -395,6 +398,7 @@ class DataProcessor:
         self.img_size = img_size
         self.validation_pct = validation_pct
         self.testing_pct = testing_pct
+        self.fold_keys = fold_keys if isinstance(fold_keys, list) else [fold_keys]
         self.data_index = {'train': [], 'valid': [], 'test': []}
         self.data_dist = {'train': defaultdict(int), 'valid': defaultdict(int), 'test': defaultdict(int)}
 
@@ -444,7 +448,11 @@ class DataProcessor:
         for class_key, id_list in class_dict.items():
             tf.logging.info(f"Allotting for class: {class_key}")
             for id in id_list:
-                idx = which_set(id, self.validation_pct, self.testing_pct, radix=len(id_list))
+                if self.fold_keys is not None:
+                    idx = 'valid' if class_key in self.fold_keys else 'train'
+                else:
+                    idx = which_set(id, self.validation_pct, self.testing_pct, radix=len(id_list))
+
                 self.data_index[idx].append(id)
                 self.data_dist[idx][class_key] += 1
             
