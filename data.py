@@ -456,9 +456,10 @@ class DataProcessor:
                 if self.fold_keys is not None:
                     idx = 'valid' if class_key in self.fold_keys else 'train'
                 else:
-                    idx = which_set(id, self.validation_pct, self.testing_pct, radix=len(id_list))
+                    # idx = which_set(id, self.validation_pct, self.testing_pct, radix=len(id_list))
+                    idx = id[1]
 
-                self.data_index[idx].append(id)
+                self.data_index[idx].append(id[0])
                 self.data_dist[idx][class_key] += 1
             
         tf.logging.info(f"Training total: {len(self.data_index['train'])}")
@@ -476,7 +477,8 @@ class DataProcessor:
         id_list = list({os.path.splitext(os.path.basename(file))[0][:-4] for file in all_files})
         df = df.query('img_id in @id_list')
 
-        result = dict(df.groupby(df.cluster)['img_id'].apply(list))
+        #result = dict(df.groupby(df.cluster)['img_id'].apply(list))
+        result = dict(df.groupby(df.cluster)[['img_id', 'set']].apply(lambda g: g.values.tolist()))
 
         ttl = 0
         for key, value in result.items():

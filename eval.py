@@ -727,7 +727,7 @@ def main(_):
 
 tf.app.flags.DEFINE_string(
     'trained_checkpoint', None,
-    'The checkpoint to initialize evaluation from')
+    'Comma separated list of checkpoints. Checkpoint path is followed by * and 0 or 1 to indicate image inversion')
 
 tf.app.flags.DEFINE_string(
     'src', 'test',
