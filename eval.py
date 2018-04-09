@@ -559,7 +559,9 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
 
     pred_full = build_model(img_input)
 
-    train.restore_from_checkpoint(trained_checkpoint, sess)
+    # train.restore_from_checkpoint(trained_checkpoint, sess)
+    checkpoints = [ckpt.strip() for ckpt in trained_checkpoint.split(',')]
+    tf.logging.info(f"Checkpoints: {checkpoints}")
 
     data_processor = data.DataProcessor(src=src, img_size=window_size, testing_pct=100)
     
@@ -568,55 +570,60 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
 
     rle_results = []
     for cnt in range(0, data_processor.mode_size(mode='test')):
-        sample_tiles, sample_info = data_processor.batch_test(offset=cnt, overlap_const=OVERLAP_CONST)
-        if _DEBUG_WRITE_:
-            data_processor.copy_id(sample_info['id'], src='debug')
-        tf.logging.info(f"Evaluating file {cnt}, id: {sample_info['id']}")
-    
-        # Prediction --------------------------------
-        tile_rows, tile_cols = sample_tiles.shape[0:2]
-        tf.logging.info(f"tile_rows, tile_cols: {tile_rows}, {tile_cols}")
-        
-        sample_batch = sample_tiles.reshape(tile_rows * tile_cols, *sample_tiles.shape[2:])
 
         all_predictions = []
-        # Run predictions on each affine augmentation (rotation, flip)
-        for flip in range(1):
-            for rotation in range(4):
-                tf.logging.info(f"flip, rotation: {flip}, {rotation}")
-                sample_batch_aug = affine_augment(sample_batch, flip, rotation)
+        for ckpt in checkpoints:
+            ckpt_file, inv = ckpt.split('*')
+            train.restore_from_checkpoint(ckpt_file, sess)
 
-                # TODO: parameterize
-                batch_size = 8
-                pred_batches = []
-                for i in range(0, sample_batch_aug.shape[0], batch_size):
-                    pred_batch = sess.run(pred_full, feed_dict={img_input: sample_batch_aug[i:i + batch_size]})
-                    pred_batches.append(pred_batch)
+            sample_tiles, sample_info = data_processor.batch_test(offset=cnt, overlap_const=OVERLAP_CONST, invert=int(inv))
+            if _DEBUG_WRITE_:
+                data_processor.copy_id(sample_info['id'], src='debug')
+            tf.logging.info(f"Evaluating file {cnt}, id: {sample_info['id']}")
 
-                sample_pred = np.concatenate(pred_batches)
-                tf.logging.info(f"sample_pred.shape (post-batch): {sample_pred.shape}")
+            # Prediction --------------------------------
+            tile_rows, tile_cols = sample_tiles.shape[0:2]
+            tf.logging.info(f"tile_rows, tile_cols: {tile_rows}, {tile_cols}")
 
-                # Reverse the augmentation and store in list
-                sample_pred = affine_augment(sample_pred, flip, -rotation)
+            sample_batch = sample_tiles.reshape(tile_rows * tile_cols, *sample_tiles.shape[2:])
 
-                all_predictions.append(sample_pred)
+            # Run predictions on each affine augmentation (rotation, flip)
+            for flip in range(1):
+                for rotation in range(4):
+                    tf.logging.info(f"flip, rotation: {flip}, {rotation}")
+                    sample_batch_aug = affine_augment(sample_batch, flip, rotation)
 
-        # sample_batch_raw = data_processor.preprocess(sample_batch, reverse=True)
-        # for aug in IMAGE_AUGS:
-        #     sample_batch_aug = aug.augment_images(sample_batch_raw)
-        #     sample_batch_aug = data_processor.preprocess(sample_batch_aug)
-        #
-        #     # TODO: parameterize
-        #     batch_size = 8
-        #     pred_batches = []
-        #     for i in range(0, sample_batch_aug.shape[0], batch_size):
-        #         pred_batch = sess.run(pred_full, feed_dict={img_input: sample_batch_aug[i:i + batch_size]})
-        #         pred_batches.append(pred_batch)
-        #
-        #     sample_pred = np.concatenate(pred_batches)
-        #     tf.logging.info(f"sample_pred.shape (post-batch): {sample_pred.shape}")
-        #
-        #     all_predictions.append(sample_pred)
+                    # TODO: parameterize
+                    batch_size = 8
+                    pred_batches = []
+                    for i in range(0, sample_batch_aug.shape[0], batch_size):
+                        pred_batch = sess.run(pred_full, feed_dict={img_input: sample_batch_aug[i:i + batch_size]})
+                        pred_batches.append(pred_batch)
+
+                    sample_pred = np.concatenate(pred_batches)
+                    tf.logging.info(f"sample_pred.shape (post-batch): {sample_pred.shape}")
+
+                    # Reverse the augmentation and store in list
+                    sample_pred = affine_augment(sample_pred, flip, -rotation)
+
+                    all_predictions.append(sample_pred)
+
+            # sample_batch_raw = data_processor.preprocess(sample_batch, reverse=True)
+            # for aug in IMAGE_AUGS:
+            #     sample_batch_aug = aug.augment_images(sample_batch_raw)
+            #     sample_batch_aug = data_processor.preprocess(sample_batch_aug)
+            #
+            #     # TODO: parameterize
+            #     batch_size = 8
+            #     pred_batches = []
+            #     for i in range(0, sample_batch_aug.shape[0], batch_size):
+            #         pred_batch = sess.run(pred_full, feed_dict={img_input: sample_batch_aug[i:i + batch_size]})
+            #         pred_batches.append(pred_batch)
+            #
+            #     sample_pred = np.concatenate(pred_batches)
+            #     tf.logging.info(f"sample_pred.shape (post-batch): {sample_pred.shape}")
+            #
+            #     all_predictions.append(sample_pred)
 
         # Take the mean of the predictions
         sample_pred = np.mean(all_predictions, axis=0)

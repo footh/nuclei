@@ -7,7 +7,7 @@ from skimage import morphology
 from skimage import filters
 from scipy.spatial import distance
 import data
-
+from datetime import datetime
 
 _DEBUG_ = False
 
@@ -54,6 +54,17 @@ def area_triangle(p1, p2, p3):
     area = (s * (s - side1) * (s - side2) * (s - side3)) ** 0.5
     return area
 
+
+_START_TIME_ = None
+def start():
+    global _START_TIME_
+    _START_TIME_ = datetime.now()
+
+
+def elapsed():
+    result = (datetime.now() - _START_TIME_).total_seconds() * 1000
+    start()
+    return result
 
 def _debug_output(dp, sample_id, result_seg, result_con, divisors):
     print(f"seg: {np.sum(result_seg > 1)}")
