@@ -70,6 +70,8 @@ CONTOUR_FREQ_RATIO = 0.01  # Ratio of positive contour labels that must be in a 
 CONTOUR_FREQ = 0.6  # Percentage of a batch that must contain contour label hits
 CONTOUR_CONTINUE_MAX = 100  # Amount of times to try a different sample before just moving on with the batch
 
+COLOR_AUG = [-25, 25]
+
 _DEBUG_ = True
 _DEBUG_WRITE_ = False
 
@@ -606,6 +608,12 @@ class DataProcessor:
         #     sample = skimage.util.invert(sample)
 
         # sample = self._color_aug.augment_image(sample)
+        if np.random.randint(0, 2):
+            color_adj = [np.random.randint(*COLOR_AUG), np.random.randint(*COLOR_AUG), np.random.randint(*COLOR_AUG)]
+            sample = sample + color_adj
+            sample = np.clip(sample, 0, 255).astype(np.uint8)
+            tf.logging.debug(f"Color adjustment: {color_adj}")
+
         sample = self._image_aug.augment_image(sample)
 
         return sample, sample_seg, sample_con
