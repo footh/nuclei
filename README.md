@@ -10,9 +10,9 @@ nuclei kaggle challenge
 
 - accuracy calculation
 
-- data augmentation (flip, distortion, also darken? some images are very dark where you can barely see the cells, tf.image has random brightness, darkness, hue and saturation)
+- **DONE** data augmentation (flip, distortion, also darken? some images are very dark where you can barely see the cells, tf.image has random brightness, darkness, hue and saturation)
 
-- cleaning up mask data (holes for ex)
+- **DONE** cleaning up mask data (holes for ex)
 
 - **DONE** more work on contour labels (dcan paper talks about running a disk filter)
 
