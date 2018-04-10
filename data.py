@@ -458,8 +458,10 @@ class DataProcessor:
                 if self.fold_keys is not None:
                     idx = 'valid' if class_key in self.fold_keys else 'train'
                 else:
-                    # idx = which_set(id, self.validation_pct, self.testing_pct, radix=len(id_list))
-                    idx = id[1]
+                    if self.use_mosaics:
+                        idx = id[1]
+                    else:
+                        idx = which_set(id[0], self.validation_pct, self.testing_pct, radix=len(id_list))
 
                 self.data_index[idx].append(id[0])
                 self.data_dist[idx][class_key] += 1
@@ -479,7 +481,7 @@ class DataProcessor:
         id_list = list({os.path.splitext(os.path.basename(file))[0][:-4] for file in all_files})
         df = df.query('img_id in @id_list')
 
-        #result = dict(df.groupby(df.cluster)['img_id'].apply(list))
+        # result = dict(df.groupby(df.cluster)['img_id'].apply(list))
         result = dict(df.groupby(df.cluster)[['img_id', 'set']].apply(lambda g: g.values.tolist()))
 
         ttl = 0
@@ -502,11 +504,12 @@ class DataProcessor:
         flist = list({f"{os.path.splitext(os.path.basename(file))[0][:-4]}.{IMG_EXT}" for file in all_files})
         df = df.query('filename in @flist')
 
-        result = dict(df.groupby(df.foreground + '-' + df.background)['filename'].apply(list))
-    
+        # result = dict(df.groupby(df.foreground + '-' + df.background)['filename'].apply(list))
+        result = dict(df.groupby(df.foreground + '-' + df.background)[['filename', 'set']].apply(lambda g: g.values.tolist()))
+
         ttl = 0
         for key, value in result.items():
-            id_list = [os.path.splitext(v)[0] for v in value]
+            id_list = [[os.path.splitext(v[0])[0], v[1]] for v in value]
             result[key] = id_list
 
             tf.logging.info(f"{key}: {len(id_list)}")
