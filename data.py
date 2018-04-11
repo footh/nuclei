@@ -388,7 +388,7 @@ def multi_process_data(src='train', pool_fn=list_convert_masks, processes=8):
 class DataProcessor:
     
     def __init__(self, src='train', img_size=256, validation_pct=0, testing_pct=0,
-                 fold_keys=None, valid_same=True, use_mosaics=False):
+                 fold_keys=None, valid_same=True, use_mosaics=False, excl_keys=None):
         """
             Build data processor for yielding train, valid and test data
 
@@ -402,6 +402,7 @@ class DataProcessor:
         self.validation_pct = validation_pct
         self.testing_pct = testing_pct
         self.fold_keys = fold_keys if fold_keys is None or isinstance(fold_keys, list) else [fold_keys]
+        self.excl_keys = excl_keys if excl_keys is None or isinstance(excl_keys, list) else [excl_keys]
         self.data_index = {'train': [], 'valid': [], 'test': []}
         self.data_dist = {'train': defaultdict(int), 'valid': defaultdict(int), 'test': defaultdict(int)}
         self.use_mosaics = use_mosaics
@@ -454,6 +455,11 @@ class DataProcessor:
 
         for class_key, id_list in class_dict.items():
             tf.logging.info(f"Allotting for class: {class_key}")
+
+            if self.excl_keys is not None and class_key in self.excl_keys:
+                tf.logging.info(f"Skipping class {class_key}, found in exclusions")
+                continue
+
             for id in id_list:
                 if self.fold_keys is not None:
                     idx = 'valid' if class_key in self.fold_keys else 'train'
