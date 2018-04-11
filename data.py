@@ -617,11 +617,11 @@ class DataProcessor:
         #     sample = skimage.util.invert(sample)
 
         # sample = self._color_aug.augment_image(sample)
-        if np.random.randint(0, 2):
-            color_adj = [np.random.randint(*COLOR_AUG), np.random.randint(*COLOR_AUG), np.random.randint(*COLOR_AUG)]
-            sample = sample + color_adj
-            sample = np.clip(sample, 0, 255).astype(np.uint8)
-            tf.logging.debug(f"Color adjustment: {color_adj}")
+        # if np.random.randint(0, 2):
+        #     color_adj = [np.random.randint(*COLOR_AUG), np.random.randint(*COLOR_AUG), np.random.randint(*COLOR_AUG)]
+        #     sample = sample + color_adj
+        #     sample = np.clip(sample, 0, 255).astype(np.uint8)
+        #     tf.logging.debug(f"Color adjustment: {color_adj}")
 
         sample = self._image_aug.augment_image(sample)
 
