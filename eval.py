@@ -352,6 +352,8 @@ def split_convexity(labels):
             defects = cv2.convexityDefects(cnt, hull)
 
             key_points = []
+            starts = []
+            ends = []
             for j in range(defects.shape[0]):
                 s, e, f, d = defects[j, 0]
                 start = tuple(cnt[s][0])
@@ -365,24 +367,29 @@ def split_convexity(labels):
                 dist_base_ratio = norm_dist / distance.euclidean(start, end)
 
                 if norm_dist_ratio > CONVEX_DIST_MIN and dist_base_ratio > DIST_BASE_RATIO_MIN:
+                    starts.append(start)
+                    ends.append(end)
                     key_points.append(far)
 
-            if len(key_points) >= 2:
-                for k in range(len(key_points)):
-                    p1 = key_points[k]
-
-                    nearest = None
-                    min_dist = np.inf
-                    for l in range(len(key_points)):
-                        if k != l:
-                            p2 = key_points[l]
-                            dist = distance.euclidean(p1, p2)
-                            if dist < min_dist:
-                                min_dist = dist
-                                nearest = p2
-
-                    if nearest is not None:
-                        cv2.line(mask, p1, nearest, [0, 0, 0], 2)
+            if len(key_points) == 1:
+                mid = (int((starts[0][0] + ends[0][0]) / 2), int((starts[0][1] + ends[0][1]) / 2))
+                util.draw_long_line(mask, mid, key_points[0])
+            # elif len(key_points) >= 2:
+            #     for k in range(len(key_points)):
+            #         p1 = key_points[k]
+            #
+            #         nearest = None
+            #         min_dist = np.inf
+            #         for l in range(len(key_points)):
+            #             if k != l:
+            #                 p2 = key_points[l]
+            #                 dist = distance.euclidean(p1, p2)
+            #                 if dist < min_dist:
+            #                     min_dist = dist
+            #                     nearest = p2
+            #
+            #         if nearest is not None:
+            #             cv2.line(mask, p1, nearest, [0, 0, 0], 2)
 
         labels_new = morphology.label(mask)
         for j in range(1, labels_new.max() + 1):
@@ -547,7 +554,7 @@ def post_process(result_seg, result_con, sample_id=None):
 
 def evaluate(trained_checkpoint, src='test', use_spline=True):
     if FLAGS.debug_path is not None:
-        SET_DEBUG(True, True, FLAGS.debug_path)
+        SET_DEBUG(False, True, FLAGS.debug_path)
     
     # TODO: parameterize
     window_size = train.IMG_SIZE

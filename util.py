@@ -8,6 +8,7 @@ from skimage import filters
 from scipy.spatial import distance
 import data
 from datetime import datetime
+import cv2
 
 _DEBUG_ = False
 
@@ -39,7 +40,18 @@ def plot_hist(data, bins=50, ticks=(0, 1000, 20)):
     ax.set_xticks(major_ticks)
     plt.xticks(rotation=90)    
     plt.grid(True)
-    plt.show()    
+    plt.show()
+
+
+def draw_long_line(img, p1, p2, color=0, size=2):
+    """
+        Draw line starting at p1 through p2 to the end of the image
+    """
+    theta = np.arctan2(p1[1]-p2[1], p1[0]-p2[0])
+    endpt_x = int(p1[0] - img.shape[0]*np.cos(theta))
+    endpt_y = int(p1[1] - img.shape[1]*np.sin(theta))
+
+    cv2.line(img, (p1[0], p1[1]), (endpt_x, endpt_y), color, size)
 
 
 def area_triangle(p1, p2, p3):
