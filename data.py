@@ -287,18 +287,27 @@ def add_to_classes(src, class_file='classes-mosaic.csv'):
         assert(imga.dtype == np.uint8)
 
         if is_gray(imga):
-            cluster = 5
+            # cluster = 5
+            cluster = 'gray'
             gray_count += 1
         else:
-            cluster = 6
+            # cluster = 6
+            cluster = 'maize'
             color_count += 1
 
         r, c = imga.shape[0:2]
-        new_row = {'img_id': img_id,
-                   'cluster': cluster,
+        # new_row = {'img_id': img_id,
+        #            'cluster': cluster,
+        #            'rows': r,
+        #            'cols': c,
+        #            'set': src}
+        new_row = {'filename': f"{img_id}.png",
+                   'foreground': cluster,
+                   'background': 'blue',
                    'rows': r,
                    'cols': c,
                    'set': src}
+
 
         df = df.append(new_row, ignore_index=True)
 
