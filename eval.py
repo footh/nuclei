@@ -278,6 +278,9 @@ def build_model(img_input):
 
 def size_boundaries(sizes):
 
+    if len(sizes) == 0:
+        return 0, 0
+
     sizes.sort()
     mean = np.mean(sizes)
     std = np.std(sizes)
@@ -487,7 +490,8 @@ def post_process(result_seg, result_con, sample_id=None):
     if _DEBUG_:
         util.plot_compare(label2rgb(result, bg_label=0), label2rgb(result_sized, bg_label=0), "result", "result_sized")
         #util.plot_hist(sizes)
-    tf.logging.info(f"Shape: {result.shape}, Size data, min: {min(sizes)}, max: {max(sizes)}, avg: {np.mean(sizes):.4f}, std: {np.std(sizes):.4f}")
+    if len(sizes) > 0:
+        tf.logging.info(f"Shape: {result.shape}, Size data, min: {min(sizes)}, max: {max(sizes)}, avg: {np.mean(sizes):.4f}, std: {np.std(sizes):.4f}")
     tf.logging.info(f"Result label count (small labels removed): {result_sized.max()}")
 
     if _DEBUG_WRITE_:
@@ -585,7 +589,7 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
 
             sample_tiles, sample_info = data_processor.batch_test(offset=cnt, overlap_const=OVERLAP_CONST, invert=int(inv))
             if _DEBUG_WRITE_:
-                data_processor.copy_id(sample_info['id'], src='debug')
+                data_processor.copy_id(sample_info['id'], src=FLAGS.debug_path)
             tf.logging.info(f"Evaluating file {cnt}, id: {sample_info['id']}")
 
             # Prediction --------------------------------

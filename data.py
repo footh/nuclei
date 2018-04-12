@@ -599,7 +599,7 @@ class DataProcessor:
         tf.logging.info(f"Copying files with id {id}...")
         search_path = os.path.join(self.src_dir, f"{id}-*.{IMG_EXT}")
         for img_path in gfile.Glob(search_path):
-            shutil.copy2(img_path, os.path.join(self.src_dir, '..', src))
+            shutil.copy2(img_path, os.path.join('/tmp/nuclei', src))
     
     def copy_mode(self, mode='valid', src='valid'):
         """
