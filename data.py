@@ -252,6 +252,61 @@ def ratio(src='train'):
     return seg_ratio, con_ratio
 
 
+def is_gray(imga):
+    """
+        Determine if 3-channel image is RGB or not
+    """
+    if len(imga.shape) == 2:
+        return True
+
+    channels = imga.shape[2]
+    assert(channels == 3 or channels == 4)
+
+    rg = np.sum(imga[:, :, 0] == imga[:, :, 1])
+    rb = np.sum(imga[:, :, 0] == imga[:, :, 2])
+    gb = np.sum(imga[:, :, 1] == imga[:, :, 2])
+
+    pixels_per_chan = imga.shape[0] * imga.shape[1]
+    if (rg + rb + gb) == 3 * pixels_per_chan:
+        return True
+
+    return False
+
+
+def add_to_classes(src, class_file='classes-mosaic.csv'):
+    df = pd.read_csv(class_file)
+
+    gray_count = 0
+    color_count = 0
+    flist = raw_file_list(src)
+    for f in flist:
+        img_id = os.path.splitext(os.path.basename(f))[0]
+
+        print(f"Processing {img_id}...")
+        imga = np.asarray(Image.open(f))
+        assert(imga.dtype == np.uint8)
+
+        if is_gray(imga):
+            cluster = 5
+            gray_count += 1
+        else:
+            cluster = 6
+            color_count += 1
+
+        r, c = imga.shape[0:2]
+        new_row = {'img_id': img_id,
+                   'cluster': cluster,
+                   'rows': r,
+                   'cols': c,
+                   'set': src}
+
+        df = df.append(new_row, ignore_index=True)
+
+    print(f"Gray Count: {gray_count}")
+    print(f"Color Count: {color_count}")
+    df.to_csv(f"{os.path.splitext(class_file)[0]}2.csv")
+
+
 def which_set(file_id, validation_pct, testing_pct, radix=MAX_NUM_PER_CLASS):
     """
         Determines which data partition the file should belong to.

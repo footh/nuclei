@@ -554,7 +554,7 @@ def post_process(result_seg, result_con, sample_id=None):
 
 def evaluate(trained_checkpoint, src='test', use_spline=True):
     if FLAGS.debug_path is not None:
-        SET_DEBUG(False, True, FLAGS.debug_path)
+        SET_DEBUG(True, True, FLAGS.debug_path)
     
     # TODO: parameterize
     window_size = train.IMG_SIZE
