@@ -15,7 +15,7 @@ _DEBUG_ = False
 
 def plot_compare(img1, img2, title1='Image1', title2='Image2'):
     
-    fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(32, 16), sharex=True, sharey=True)
+    fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(28, 14), sharex=True, sharey=True)
 
     ax1.imshow(img1, cmap=plt.cm.gray)
     ax1.set_title(title1)

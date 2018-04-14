@@ -60,7 +60,7 @@ SIZE_MININUMS = {
         500: 55,
         600: 65,
         800: 75,
-        10000: 85
+        1000000: 85
     }
 
 # newsz4 yields 0.447 on LB
@@ -211,8 +211,8 @@ def run_transforms(imga, transforms):
     transformed_image = np.copy(imga)
     for method, kwargs in transforms.items():
         imgt = method(transformed_image, **kwargs)
-        if _DEBUG_:
-            util.plot_compare(transformed_image, imgt, title1=f"pre-{method.__name__}", title2=f"post-{method.__name__}")
+        # if _DEBUG_:
+        #     util.plot_compare(transformed_image, imgt, title1=f"pre-{method.__name__}", title2=f"post-{method.__name__}")
         transformed_image = imgt
     
     return transformed_image
@@ -402,6 +402,23 @@ def split_convexity(labels):
     return result
 
 
+def remove_long(labels, len_factor=5):
+    rprops = skimage.measure.regionprops(labels)
+
+    result = np.zeros(labels.shape, dtype=np.int16)
+    long_labels = 0
+    for i in range(1, labels.max() + 1):
+        minor_axis = rprops[i - 1].minor_axis_length
+        major_axis = rprops[i - 1].major_axis_length
+
+        if major_axis < len_factor * minor_axis:
+            result[labels == i] = i - long_labels
+        else:
+            long_labels += 1
+
+    return result
+
+
 def super_frangi(img):
     inv_img = invert(img)
 
@@ -445,15 +462,15 @@ def post_process(result_seg, result_con, sample_id=None):
     # np.save('/tmp/nuclei/con2.npy', trans_con)
     # np.save('/tmp/nuclei/res2.npy', result_con)
     # return
-    if _DEBUG_:
-        util.plot_compare(result_con, trans_con, "result_con", "trans_con")
+    # if _DEBUG_:
+    #     util.plot_compare(result_con, trans_con, "result_con", "trans_con")
     
     #segments = np.logical_and(thresh_seg, np.logical_not(trans_con))
     #segments = (result_seg - CON_MULT * result_con) > SEG_THRESH
     segments = (result_seg - CON_MULT * trans_con) > SEG_THRESH
-    if _DEBUG_:
-        util.plot_compare(result_seg, result_con, "result_seg", "result_con")
-        util.plot_compare(result_seg, segments, "result_seg", "segments")
+    # if _DEBUG_:
+    #     util.plot_compare(result_seg, result_con, "result_seg", "result_con")
+    #     util.plot_compare(result_seg, segments, "result_seg", "segments")
         
     #segments_cl = close_filter(segments)
     segments_cl = segments
@@ -461,14 +478,14 @@ def post_process(result_seg, result_con, sample_id=None):
     #     util.plot_compare(segments, segments_cl, "segments", "segments_cl")
 
     labels = morphology.label(segments_cl)
-    if _DEBUG_:
-        util.plot_compare(segments_cl, label2rgb(labels, bg_label=0), "segments", "labels")
+    # if _DEBUG_:
+    #     util.plot_compare(segments_cl, label2rgb(labels, bg_label=0), "segments", "labels")
     
     distance_seg = ndi.distance_transform_edt(thresh_seg)
     
     result = morphology.watershed(-distance_seg, labels, mask=thresh_seg)
-    if _DEBUG_:
-        util.plot_compare(label2rgb(labels, bg_label=0), label2rgb(result, bg_label=0), "labels", "result")
+    # if _DEBUG_:
+    #     util.plot_compare(label2rgb(labels, bg_label=0), label2rgb(result, bg_label=0), "labels", "result")
     tf.logging.info(f"Result label count: {result.max()}")
 
     sizes = []
@@ -507,6 +524,15 @@ def post_process(result_seg, result_con, sample_id=None):
     # **DONE** no vas TODO: another fix for above is to do the watershed separation method (see valid #52)
     # ** DONE **, tried dilation on labels, bad
     # TODO: see clear_border method which removes dots near borders
+
+    # result_sized_short = remove_long(result_sized)
+    # if _DEBUG_:
+    #     util.plot_compare(label2rgb(result_sized, bg_label=0), label2rgb(result_sized_short, bg_label=0), "result_sized", "result_sized_short")
+    # if _DEBUG_WRITE_:
+    #     if sample_id is None: sample_id = 'result_sized'
+    #     d_img = img_as_ubyte(label2rgb(result_sized, bg_label=0))
+    #     Image.fromarray(d_img).save(f"/tmp/nuclei/{FLAGS.debug_path}/{sample_id}.png")
+    #     np.save(f"/tmp/nuclei/{FLAGS.debug_path}/{sample_id}.npy", result_sized_short)
 
     # Morphology split
     # result_sized_split = split_labels(result_sized)
@@ -556,7 +582,7 @@ def post_process(result_seg, result_con, sample_id=None):
     return result_sized
 
 
-def evaluate(trained_checkpoint, src='test', use_spline=True):
+def evaluate(trained_checkpoint, src='test', use_spline=True, resize=None):
     if FLAGS.debug_path is not None:
         SET_DEBUG(True, True, FLAGS.debug_path)
     
@@ -587,7 +613,10 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
             ckpt_file, inv = ckpt.split('*')
             train.restore_from_checkpoint(ckpt_file, sess)
 
-            sample_tiles, sample_info = data_processor.batch_test(offset=cnt, overlap_const=OVERLAP_CONST, invert=int(inv))
+            sample_tiles, sample_info = data_processor.batch_test(offset=cnt,
+                                                                  overlap_const=OVERLAP_CONST,
+                                                                  invert=int(inv),
+                                                                  resize=resize)
             if _DEBUG_WRITE_:
                 data_processor.copy_id(sample_info['id'], src=FLAGS.debug_path)
             tf.logging.info(f"Evaluating file {cnt}, id: {sample_info['id']}")
@@ -680,6 +709,13 @@ def evaluate(trained_checkpoint, src='test', use_spline=True):
 
         # util._debug_output(data_processor, sample_info['id'], result_seg, result_con, divisors)
 
+        print(f"min, max, mean, std (BEFORE): {np.min(result_seg)}, {np.max(result_seg)}, {np.mean(result_seg)}, {np.std(result_seg)}")
+        if resize is not None:
+            tf.logging.info(f"Resizing results back to {sample_info['resized_from']}")
+            result_seg = scipy.misc.imresize(result_seg, sample_info['resized_from'], mode='F')
+            result_con = scipy.misc.imresize(result_con, sample_info['resized_from'], mode='F')
+        print(f"min, max, mean, std (AFTER): {np.min(result_seg)}, {np.max(result_seg)}, {np.mean(result_seg)}, {np.std(result_seg)}")
+
         result = post_process(result_seg, result_con, sample_id=sample_info['id'])
         
         # Trying dilation (and closing) here resulted in duplicate pixels which the submission code caught
@@ -719,8 +755,11 @@ def main(_):
 
     tf.logging.set_verbosity(tf.logging.INFO)
 
-    rle_results = evaluate(FLAGS.trained_checkpoint, FLAGS.src)
-    
+    resize = None
+    if FLAGS.resize is not None:
+        resize = (FLAGS.resize, FLAGS.resize)
+    rle_results = evaluate(FLAGS.trained_checkpoint, FLAGS.src, resize=resize)
+
     if FLAGS.submission_file is not None:
         submission_file_name = f"submission-{FLAGS.submission_file}-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
         submission_file_name = os.path.join('submissions', submission_file_name)
@@ -751,6 +790,10 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_string(
     'debug_path', None,
     'Both turns on debugging and indicates the sub-directory under /tmp/nuclei to save debug files')
+
+tf.app.flags.DEFINE_integer(
+    'resize', None,
+    'Height and width value to resize to')
 
 
 FLAGS = tf.app.flags.FLAGS
