@@ -725,6 +725,141 @@ def evaluate(trained_checkpoint, src='test', use_spline=True, resize=None):
     return rle_results
 
 
+def evaluate_scales(trained_checkpoint, src='test', use_spline=True, scales=[1]):
+    if FLAGS.debug_path is not None:
+        SET_DEBUG(True, True, FLAGS.debug_path)
+
+    # TODO: parameterize
+    window_size = train.IMG_SIZE
+
+    sess = tf.InteractiveSession()
+
+    with tf.variable_scope(f"{train.MODEL_SCOPE}/data"):
+        img_input = tf.placeholder(tf.float32, [None, window_size, window_size, 3], name='img_input')
+
+    pred_full = build_model(img_input)
+
+    # train.restore_from_checkpoint(trained_checkpoint, sess)
+    checkpoints = [ckpt.strip() for ckpt in trained_checkpoint.split(',')]
+    tf.logging.info(f"Checkpoints: {checkpoints}")
+
+    tf.logging.info(f"Scales: {scales}")
+
+    data_processor = data.DataProcessor(src=src, img_size=window_size, testing_pct=100)
+
+    if use_spline:
+        spline_window = _spline_window(window_size)
+
+    rle_results = []
+    for cnt in range(0, data_processor.mode_size(mode='test')):
+
+        scale_preds_seg = []
+        scale_preds_con = []
+        for scale in scales:
+
+            sample_tiles, sample_info = data_processor.batch_test(offset=cnt,
+                                                                  overlap_const=OVERLAP_CONST,
+                                                                  scale=scale)
+            if _DEBUG_WRITE_:
+                data_processor.copy_id(sample_info['id'], src=FLAGS.debug_path)
+            tf.logging.info(f"Evaluating file {cnt}, id: {sample_info['id']}")
+
+            for ckpt in checkpoints:
+                ckpt_file, inv = ckpt.split('*')
+                train.restore_from_checkpoint(ckpt_file, sess)
+
+                # Prediction --------------------------------
+                tile_rows, tile_cols = sample_tiles.shape[0:2]
+                tf.logging.info(f"tile_rows, tile_cols: {tile_rows}, {tile_cols}")
+
+                sample_batch = sample_tiles.reshape(tile_rows * tile_cols, *sample_tiles.shape[2:])
+
+                all_predictions = []
+                # Run predictions on each affine augmentation (rotation, flip)
+                for flip in range(1):
+                    for rotation in range(4):
+                        tf.logging.info(f"flip, rotation: {flip}, {rotation}")
+                        sample_batch_aug = affine_augment(sample_batch, flip, rotation)
+
+                        # TODO: parameterize
+                        batch_size = 8
+                        pred_batches = []
+                        for i in range(0, sample_batch_aug.shape[0], batch_size):
+                            pred_batch = sess.run(pred_full, feed_dict={img_input: sample_batch_aug[i:i + batch_size]})
+                            pred_batches.append(pred_batch)
+
+                        sample_pred = np.concatenate(pred_batches)
+                        tf.logging.info(f"sample_pred.shape (post-batch): {sample_pred.shape}")
+
+                        # Reverse the augmentation and store in list
+                        sample_pred = affine_augment(sample_pred, flip, -rotation)
+
+                        all_predictions.append(sample_pred)
+
+                # Take the mean of the predictions
+                sample_pred = np.mean(all_predictions, axis=0)
+                tf.logging.info(f"sample_pred.shape (post-mean): {sample_pred.shape}")
+
+                sample_pred = sample_pred.reshape(tile_rows, tile_cols, *sample_pred.shape[1:])
+                # -------------------------------------------
+
+                step = sample_info['step']
+                full_pred_rows = (tile_rows + 1) * step
+                full_pred_cols = (tile_cols + 1) * step
+                tf.logging.info(f"full_pred_rows, full_pred_cols: {full_pred_rows}, {full_pred_cols}")
+
+                result_seg = np.zeros((full_pred_rows, full_pred_cols), dtype=np.float32)
+                result_con = np.zeros((full_pred_rows, full_pred_cols), dtype=np.float32)
+                divisors = np.zeros((full_pred_rows, full_pred_cols), dtype=np.float32)
+
+                for i, row_start in enumerate(range(0, full_pred_rows - step, step)):
+                    for j, col_start in enumerate(range(0, full_pred_cols - step, step)):
+                        seg = sample_pred[i, j, :, :, 0]
+                        con = sample_pred[i, j, :, :, 1]
+                        if use_spline:
+                            seg = seg * spline_window
+                            con = con * spline_window
+                        result_seg[row_start:row_start + window_size, col_start:col_start + window_size] += seg
+                        result_con[row_start:row_start + window_size, col_start:col_start + window_size] += con
+                        divisors[row_start:row_start + window_size, col_start:col_start + window_size] += 1.
+
+                if use_spline:
+                    result_seg = result_seg / OVERLAP_CONST ** 2
+                    result_con = result_con / OVERLAP_CONST ** 2
+                else:
+                    result_seg = result_seg / divisors
+                    result_con = result_con / divisors
+
+                pad_row = sample_info['pad_row']
+                pad_col = sample_info['pad_col']
+                # orig_rows, orig_cols = sample_info['orig_shape'][0:2]
+                tf.logging.info(f"original shape: {sample_info['orig_shape']}")
+                result_seg = result_seg[pad_row[0]:-pad_row[1], pad_col[0]:-pad_col[1]]
+                result_con = result_con[pad_row[0]:-pad_row[1], pad_col[0]:-pad_col[1]]
+                tf.logging.info(f"prediction final shape: {result_seg.shape}")
+
+                scale_preds_seg.append(result_seg)
+                scale_preds_con.append(result_con)
+
+        resize_shape = sample_info['resized_from']
+        for i in range(len(scale_preds_seg)):
+            print(f"min, max, mean, std (BEFORE): {np.min(scale_preds_seg[i])}, {np.max(scale_preds_seg[i])}, {np.mean(scale_preds_seg[i])}, {np.std(scale_preds_seg[i])}")
+            scale_preds_seg[i] = scipy.misc.imresize(scale_preds_seg[i], resize_shape, mode='F')
+            scale_preds_con[i] = scipy.misc.imresize(scale_preds_con[i], resize_shape, mode='F')
+            print(f"min, max, mean, std (AFTER): {np.min(scale_preds_seg[i])}, {np.max(scale_preds_seg[i])}, {np.mean(scale_preds_seg[i])}, {np.std(scale_preds_seg[i])}")
+
+        result_seg = np.mean(scale_preds_seg, axis=0)
+        result_con = np.mean(scale_preds_con, axis=0)
+
+        result = post_process(result_seg, result_con, sample_id=sample_info['id'])
+
+        # Trying dilation (and closing) here resulted in duplicate pixels which the submission code caught
+        for rle_label in rle_labels(result, dilate=None):
+            rle_results.append([sample_info['id']] + [rle_label])
+
+    return rle_results
+
+
 def test():
     data_processor = data.DataProcessor(src='vtest', img_size=256, testing_pct=100)
     sample_tiles, sample_info = data_processor.batch_test(offset=0, overlap_const=2)
@@ -755,10 +890,12 @@ def main(_):
 
     tf.logging.set_verbosity(tf.logging.INFO)
 
-    resize = None
-    if FLAGS.resize is not None:
-        resize = (FLAGS.resize, FLAGS.resize)
-    rle_results = evaluate(FLAGS.trained_checkpoint, FLAGS.src, resize=resize)
+    # resize = None
+    # if FLAGS.resize is not None:
+    #     resize = (FLAGS.resize, FLAGS.resize)
+    # rle_results = evaluate(FLAGS.trained_checkpoint, FLAGS.src, resize=resize)
+    scales = [float(s.strip()) for s in FLAGS.scales.split(',')]
+    rle_results = evaluate_scales(FLAGS.trained_checkpoint, FLAGS.src, scales=scales)
 
     if FLAGS.submission_file is not None:
         submission_file_name = f"submission-{FLAGS.submission_file}-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
@@ -795,6 +932,9 @@ tf.app.flags.DEFINE_integer(
     'resize', None,
     'Height and width value to resize to')
 
+tf.app.flags.DEFINE_string(
+    'scales', '1',
+    'Comma separated list of scales to ensemble')
 
 FLAGS = tf.app.flags.FLAGS
 

@@ -844,7 +844,7 @@ class DataProcessor:
 
         return inputs, labels_seg, labels_con
 
-    def batch_test(self, offset=0, overlap_const=2, normalize=True, invert=False, resize=None):
+    def batch_test(self, offset=0, overlap_const=2, normalize=True, invert=False, resize=None, scale=1):
         """
             Return a single sample from the test set (no labels). The sample is returned in a 2D array of 'img_size' tiles that
             comes from overlapping segments of the original sample with reflective padding. This array is row by columns and can be
@@ -864,6 +864,10 @@ class DataProcessor:
 
         sample_img = Image.open(os.path.join(self.src_dir, f"{sample_id}-{IMG_SRC}.{IMG_EXT}"))
         sample_src = np.asarray(sample_img)
+        if scale is not None:
+            resize = (int(sample_src.shape[0] * scale), int(sample_src.shape[1] * scale))
+            tf.logging.info(f"Scaling to {resize}")
+
         if resize is not None:
             tf.logging.info(f"Image resizing from {sample_src.shape} to {resize}")
             sample_info['resized_from'] = sample_src.shape[0:2]
