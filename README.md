@@ -1,5 +1,7 @@
 # nuclei
-nuclei kaggle challenge
+Kaggle 2018 Data Science Bowl solution
+
+Implementation based on "[DCAN: Deep Contour-Aware Networks for Accurate Gland Segmentation](https://arxiv.org/pdf/1604.02677.pdf)" paper
 
 # Instructions
 
